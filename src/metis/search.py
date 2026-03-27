@@ -16,8 +16,16 @@ class SearchResult:
     score: float
 
 
-def search_vault(query: str, config: MetisConfig, limit: int = 5) -> list[SearchResult]:
-    """embed query and find nearest chunks in chromadb."""
+def search_vault(
+    query: str,
+    config: MetisConfig,
+    limit: int = 5,
+    note_path: str | None = None,
+) -> list[SearchResult]:
+    """embed query and find nearest chunks in chromadb.
+
+    if note_path is given, only search within that note's chunks.
+    """
     collection = _get_collection(config)
 
     if collection.count() == 0:
@@ -25,9 +33,12 @@ def search_vault(query: str, config: MetisConfig, limit: int = 5) -> list[Search
 
     query_embedding = embed_texts([query], config)[0]
 
+    where_filter = {"file_path": note_path} if note_path else None
+
     results = collection.query(
         query_embeddings=[query_embedding],
         n_results=min(limit, collection.count()),
+        where=where_filter,
     )
 
     search_results = []

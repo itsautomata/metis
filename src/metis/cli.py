@@ -102,14 +102,32 @@ def search(
 @app.command()
 def chat(
     question: str = typer.Argument(help="question to ask your vault"),
+    note: Optional[str] = typer.Option(None, "--note", help="scope to a specific note"),
+    save: bool = typer.Option(False, "--save", "-s", help="save Q&A to the note"),
 ):
     """RAG agent loop over your knowledge base."""
-    from metis.chat import ask
+    from metis.chat import ask, save_qa_to_note, LOW_CONFIDENCE_THRESHOLD
 
     config = load_config()
+
+    # resolve note path
+    note_path = None
+    if note:
+        note_p = Path(note).expanduser()
+        if not note_p.is_absolute():
+            note_p = config.vault_path / note
+        note_path = str(note_p)
+        if not note_p.exists():
+            console.print(f"[red]note not found: {note_path}[/red]")
+            return
+
     console.print(f"[bold]asking:[/bold] {question}\n")
 
-    answer, sources = ask(question, config)
+    answer, sources, confidence, clean_question = ask(question, config, note_path=note_path)
+
+    # show reformulated query if different
+    if clean_question.lower().strip("?. ") != question.lower().strip("?. "):
+        console.print(f"[dim]query: {clean_question}[/dim]\n")
 
     console.print(answer)
     console.print()
@@ -119,6 +137,17 @@ def chat(
         for s in sources:
             name = Path(s).name
             console.print(f"  [dim]- {name}[/dim]")
+
+    if confidence < LOW_CONFIDENCE_THRESHOLD:
+        console.print(f"\n[yellow]low confidence ({confidence:.2f}) — consider verifying against the source.[/yellow]")
+
+    # save Q&A to note
+    if save and note_path:
+        if typer.confirm("\nsave to note?"):
+            save_qa_to_note(note_path, clean_question, answer)
+            console.print("[bold green]Q&A saved.[/bold green]")
+    elif save and not note_path:
+        console.print("[yellow]--save requires --note to specify which note to save to.[/yellow]")
 
 
 @app.command()
