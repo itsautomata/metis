@@ -54,6 +54,7 @@ def extract_from_arxiv(url: str) -> tuple[str, str]:
     try:
         title, text = extract_from_pdf(tmp_path)
     finally:
+        # delete temp PDF
         tmp_path.unlink()
 
     # try to get a better title from the arxiv abstract page

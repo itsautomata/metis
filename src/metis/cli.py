@@ -19,6 +19,7 @@ console = Console()
 @app.command()
 def ingest(
     source: str = typer.Argument(help="file path or URL to ingest"),
+    folder: Optional[str] = typer.Option(None, "--folder", "-f", help="vault subfolder to save in"),
 ):
     """save, summarize, tag, embed, and find links for a file or URL."""
     from metis.ingest.extract import extract
@@ -27,6 +28,9 @@ def ingest(
     from metis.index.store import store_chunks
 
     config = load_config()
+    if folder:
+        config.output_folder = folder
+
     console.print(f"[bold]ingesting:[/bold] {source}")
 
     # 1. extract

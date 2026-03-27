@@ -23,9 +23,10 @@ edit `~/.metis/config.yaml` with your vault path and api key.
 metis ingest https://en.wikipedia.org/wiki/Metis_(mythology)
 metis ingest ~/books/project-hail-mary.pdf
 metis ingest lecture-notes.md
+metis ingest paper.pdf --folder research/ai
 ```
 
-extracts text, summarizes, tags, embeds, saves as a native obsidian note with a link back to the source.
+extracts text, summarizes, tags, embeds, saves as a native obsidian note with a link back to the source. `--folder` lets you organize into vault subfolders. defaults to `output_folder` in `~/.metis/config.yaml` if not specified.
 
 ### `metis search <query>`
 
