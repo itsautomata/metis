@@ -108,22 +108,52 @@ def chat(
 @app.command()
 def link(
     note: Optional[str] = typer.Argument(None, help="note to find connections for (all notes if omitted)"),
+    write: bool = typer.Option(False, "--write", "-w", help="write wikilinks into notes"),
+    min_score: float = typer.Option(0.7, "--min-score", help="minimum similarity score"),
 ):
     """surface connections between notes."""
+    from metis.link import find_connections, write_links
+
     config = load_config()
     target = note or "all notes"
-    console.print(f"[bold]linking:[/bold] {target}")
-    # TODO: implement connection discovery
-    console.print("[yellow]not yet implemented[/yellow]")
+    console.print(f"[bold]linking:[/bold] {target}\n")
+
+    connections = find_connections(config, note_path=note, min_score=min_score)
+
+    if not connections:
+        console.print("[yellow]no connections found above threshold.[/yellow]")
+        return
+
+    for c in connections:
+        source_name = Path(c.source).stem
+        target_name = Path(c.target).stem
+        console.print(f"  [cyan]{source_name}[/cyan] → [cyan]{target_name}[/cyan] [{c.score}]")
+
+    console.print(f"\n{len(connections)} connections found.")
+
+    if write:
+        n = write_links(connections)
+        console.print(f"[bold green]{n} wikilinks written.[/bold green]")
+    else:
+        console.print("[dim]use --write to add [[wikilinks]] to your notes.[/dim]")
 
 
 @app.command()
 def sync():
     """re-index vault to catch manual edits."""
+    from metis.index.sync import sync_vault
+
     config = load_config()
-    console.print(f"[bold]syncing:[/bold] {config.vault_path}")
-    # TODO: implement vault sync
-    console.print("[yellow]not yet implemented[/yellow]")
+    console.print(f"[bold]syncing:[/bold] {config.vault_path}\n")
+
+    report = sync_vault(config)
+
+    console.print(f"  added:     {report.added} files")
+    console.print(f"  updated:   {report.updated} files")
+    console.print(f"  deleted:   {report.deleted} files")
+    console.print(f"  unchanged: {report.unchanged} files")
+    console.print()
+    console.print(f"[bold green]vault indexed.[/bold green] {report.total_files} files.")
 
 
 @app.command()
