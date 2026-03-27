@@ -12,6 +12,64 @@ def is_url(source: str) -> bool:
     return source.startswith("http://") or source.startswith("https://")
 
 
+def is_arxiv(url: str) -> bool:
+    """check if URL is an arxiv paper."""
+    return bool(re.match(r"https?://(www\.)?arxiv\.org/(abs|pdf)/", url))
+
+
+def _arxiv_to_pdf_url(url: str) -> str:
+    """convert any arxiv URL to its PDF download URL."""
+    # extract the paper ID (e.g. 2401.12345 or 2401.12345v2)
+    match = re.search(r"arxiv\.org/(abs|pdf)/([0-9.]+(?:v\d+)?)", url)
+    if not match:
+        raise ValueError(f"could not parse arxiv URL: {url}")
+    paper_id = match.group(2)
+    return f"https://arxiv.org/pdf/{paper_id}"
+
+
+def _arxiv_abs_url(url: str) -> str:
+    """get the abstract page URL for linking back."""
+    match = re.search(r"arxiv\.org/(abs|pdf)/([0-9.]+(?:v\d+)?)", url)
+    if not match:
+        return url
+    paper_id = match.group(2)
+    return f"https://arxiv.org/abs/{paper_id}"
+
+
+def extract_from_arxiv(url: str) -> tuple[str, str]:
+    """fetch and extract text from an arxiv paper. returns (title, text)."""
+    import tempfile
+
+    pdf_url = _arxiv_to_pdf_url(url)
+
+    # download the PDF
+    response = httpx.get(pdf_url, follow_redirects=True, timeout=60)
+    response.raise_for_status()
+
+    # write to temp file and extract with pymupdf
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(response.content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        title, text = extract_from_pdf(tmp_path)
+    finally:
+        tmp_path.unlink()
+
+    # try to get a better title from the arxiv abstract page
+    try:
+        abs_url = _arxiv_abs_url(url)
+        downloaded = trafilatura.fetch_url(abs_url)
+        if downloaded:
+            metadata = trafilatura.extract_metadata(downloaded)
+            if metadata and metadata.title:
+                title = metadata.title
+    except Exception:
+        pass  # keep the PDF-derived title
+
+    return title, text
+
+
 def extract_from_pdf(path: Path) -> tuple[str, str]:
     """extract text from PDF. returns (title, text)."""
     doc = fitz.open(str(path))
@@ -58,6 +116,10 @@ def extract(source: str) -> tuple[str, str, str, str]:
     - source_link is the URL or file:// URI for linking back
     """
     if is_url(source):
+        if is_arxiv(source):
+            title, text = extract_from_arxiv(source)
+            return title, text, "arxiv", _arxiv_abs_url(source)
+
         title, text = extract_from_url(source)
         return title, text, "url", source
 
