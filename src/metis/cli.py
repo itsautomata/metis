@@ -20,11 +20,13 @@ console = Console()
 def ingest(
     source: str = typer.Argument(help="file path or URL to ingest"),
     folder: Optional[str] = typer.Option(None, "--folder", "-f", help="vault subfolder to save in"),
+    lang: Optional[str] = typer.Option(None, "--lang", "-l", help="transcript language code (youtube)"),
+    pick_lang: bool = typer.Option(False, "--pick-lang", help="interactively pick transcript language (youtube)"),
 ):
     """save, summarize, tag, embed, and find links for a file or URL."""
-    from metis.ingest.extract import extract
+    from metis.ingest.extract import extract, NoTranscriptError
     from metis.ingest.process import process
-    from metis.ingest.write import write_to_vault
+    from metis.ingest.write import write_to_vault, write_link_only
     from metis.index.store import store_chunks
 
     config = load_config()
@@ -35,7 +37,17 @@ def ingest(
 
     # 1. extract
     console.print("[dim]extracting text...[/dim]")
-    title, text, source_type, source_link = extract(source)
+    try:
+        title, text, source_type, source_link, extra = extract(source, lang=lang, pick_lang=pick_lang)
+    except NoTranscriptError:
+        console.print("[yellow]no transcript found.[/yellow]")
+        save = typer.confirm("save link anyway?")
+        if save:
+            file_path = write_link_only(source, config)
+            console.print(f"[bold green]link saved.[/bold green]")
+            console.print(f"  note: {file_path}")
+        return
+
     console.print(f"  title: {title}")
     console.print(f"  type:  {source_type}")
     console.print(f"  chars: {len(text)}")
@@ -48,7 +60,7 @@ def ingest(
 
     # 3. write to vault
     console.print("[dim]writing to vault...[/dim]")
-    file_path = write_to_vault(title, text, source_link, source_type, processed, config)
+    file_path = write_to_vault(title, text, source_link, source_type, processed, config, extra=extra)
     console.print(f"  saved: {file_path}")
 
     # 4. embed + store
