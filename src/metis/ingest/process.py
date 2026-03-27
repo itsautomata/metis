@@ -63,11 +63,16 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
 
 
 def chunk_text(text: str, max_chars: int = 1500, overlap: int = 200) -> list[str]:
-    """split text into overlapping chunks at paragraph boundaries.
+    """split text into overlapping chunks at paragraph or line boundaries.
 
     targets ~500 tokens per chunk (roughly 1500 chars).
+    handles both paragraph-based text (articles) and line-based text (transcripts).
     """
+    # split on double newlines first, then fall back to single newlines
     paragraphs = text.split("\n\n")
+    if len(paragraphs) <= 1:
+        paragraphs = text.split("\n")
+
     chunks = []
     current = ""
 
@@ -81,14 +86,31 @@ def chunk_text(text: str, max_chars: int = 1500, overlap: int = 200) -> list[str
             # overlap: keep the last bit of the previous chunk
             words = current.split()
             overlap_text = " ".join(words[-30:]) if len(words) > 30 else ""
-            current = overlap_text + "\n\n" + para if overlap_text else para
+            current = overlap_text + "\n" + para if overlap_text else para
         else:
-            current = current + "\n\n" + para if current else para
+            current = current + "\n" + para if current else para
 
     if current.strip():
         chunks.append(current.strip())
 
-    return chunks if chunks else [text[:max_chars]]
+    # safety: if any chunk is still too long, hard-split it
+    safe_chunks = []
+    for chunk in chunks:
+        if len(chunk) > max_chars * 2:
+            words = chunk.split()
+            sub = ""
+            for word in words:
+                if len(sub) + len(word) + 1 > max_chars:
+                    safe_chunks.append(sub.strip())
+                    sub = word
+                else:
+                    sub = sub + " " + word if sub else word
+            if sub.strip():
+                safe_chunks.append(sub.strip())
+        else:
+            safe_chunks.append(chunk)
+
+    return safe_chunks if safe_chunks else [text[:max_chars]]
 
 
 def process(text: str, config: MetisConfig) -> ProcessedContent:
