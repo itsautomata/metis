@@ -20,8 +20,8 @@ edit `~/.metis/config.yaml` with your vault path and api key.
 ### `metis ingest <source>`
 
 ```bash
-metis ingest https://en.wikipedia.org/wiki/Stoicism
-metis ingest ~/books/deep-work.pdf
+metis ingest https://en.wikipedia.org/wiki/Metis_(mythology)
+metis ingest ~/books/project-hail-mary.pdf
 metis ingest lecture-notes.md
 ```
 
@@ -30,7 +30,7 @@ extracts text, summarizes, tags, embeds, saves as a native obsidian note with a 
 ### `metis search <query>`
 
 ```bash
-metis search "how does sleep affect learning"
+metis search "what role did titans play in greek mythos"
 ```
 
 semantic search. finds by meaning, not keywords.
@@ -38,7 +38,7 @@ semantic search. finds by meaning, not keywords.
 ### `metis chat <question>`
 
 ```bash
-metis chat "what are the best strategies for deep focus?"
+metis chat "how does project hail mary handle the fermi paradox?"
 ```
 
 answers grounded in your vault with sources cited.
