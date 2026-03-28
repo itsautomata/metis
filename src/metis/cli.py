@@ -161,8 +161,10 @@ def chat(
     note_path = None
     if note:
         note_p = Path(note).expanduser()
+        if not note_p.suffix:
+            note_p = note_p.with_suffix(".md")
         if not note_p.is_absolute():
-            note_p = config.vault_path / note
+            note_p = config.vault_path / note_p
         note_path = str(note_p)
         if not note_p.exists():
             console.print(f"[red]note not found: {note_path}[/red]")
