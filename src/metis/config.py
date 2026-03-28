@@ -24,6 +24,9 @@ DEFAULT_CONFIG = {
         "embedding_model": "text-embedding-3-small",
         "chat_model": "gpt-4o",
     },
+    "x_api": {
+        "bearer_token": "",
+    },
     "chromadb": {
         "path": str(CONFIG_DIR / "chromadb"),
     },
@@ -46,21 +49,43 @@ class AzureConfig:
 
 
 @dataclass
+class XApiConfig:
+    bearer_token: str = ""
+
+
+@dataclass
 class MetisConfig:
     vault_path: Path = field(default_factory=lambda: Path.home() / "obsidian" / "vault")
     output_folder: str = "metis-ingested"
     provider: str = "openai"
     openai: OpenAIConfig = field(default_factory=OpenAIConfig)
     azure: AzureConfig = field(default_factory=AzureConfig)
+    x_api: XApiConfig = field(default_factory=XApiConfig)
     chromadb_path: Path = field(default_factory=lambda: CONFIG_DIR / "chromadb")
 
 
 def init_config() -> Path:
-    """create default config file if it doesn't exist. returns config path."""
+    """create or update config file with any missing sections. returns config path."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
     if not CONFIG_PATH.exists():
         with open(CONFIG_PATH, "w") as f:
             yaml.dump(DEFAULT_CONFIG, f, default_flow_style=False, sort_keys=False)
+    else:
+        # merge missing keys into existing config
+        with open(CONFIG_PATH) as f:
+            existing = yaml.safe_load(f) or {}
+
+        updated = False
+        for key, value in DEFAULT_CONFIG.items():
+            if key not in existing:
+                existing[key] = value
+                updated = True
+
+        if updated:
+            with open(CONFIG_PATH, "w") as f:
+                yaml.dump(existing, f, default_flow_style=False, sort_keys=False)
+
     return CONFIG_PATH
 
 
@@ -89,6 +114,11 @@ def load_config() -> MetisConfig:
         chat_model=azure_raw.get("chat_model", "gpt-4o"),
     )
 
+    x_raw = raw.get("x_api", {})
+    x_cfg = XApiConfig(
+        bearer_token=x_raw.get("bearer_token", ""),
+    )
+
     chromadb_raw = raw.get("chromadb", {})
 
     return MetisConfig(
@@ -97,5 +127,6 @@ def load_config() -> MetisConfig:
         provider=provider,
         openai=openai_cfg,
         azure=azure_cfg,
+        x_api=x_cfg,
         chromadb_path=Path(chromadb_raw.get("path", str(CONFIG_DIR / "chromadb"))).expanduser(),
     )

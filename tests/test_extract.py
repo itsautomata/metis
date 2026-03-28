@@ -7,6 +7,7 @@ from metis.ingest.extract import (
     is_url,
     is_arxiv,
     is_youtube,
+    is_xtweet,
     _youtube_video_id,
     _arxiv_to_pdf_url,
     _arxiv_abs_url,
@@ -85,6 +86,27 @@ def test_youtube_video_id_invalid():
 
 def test_is_youtube_playlist_only():
     assert is_youtube("https://www.youtube.com/playlist?list=PLxyz") is False
+
+
+# --- x/twitter detection ---
+
+def test_is_xtweet_xcom():
+    assert is_xtweet("https://x.com/user/status/123456789") is True
+
+def test_is_xtweet_twitter():
+    assert is_xtweet("https://twitter.com/user/status/123456789") is True
+
+def test_is_xtweet_www():
+    assert is_xtweet("https://www.x.com/user/status/123456789") is True
+
+def test_is_xtweet_false():
+    assert is_xtweet("https://x.com/user") is False
+
+def test_is_xtweet_profile():
+    assert is_xtweet("https://x.com/user/likes") is False
+
+def test_is_xtweet_not_x():
+    assert is_xtweet("https://example.com/user/status/123") is False
 
 
 # --- markdown extraction ---

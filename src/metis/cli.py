@@ -38,7 +38,10 @@ def ingest(
     # 1. extract
     console.print("[dim]extracting text...[/dim]")
     try:
-        title, text, source_type, source_link, extra = extract(source, lang=lang, pick_lang=pick_lang)
+        title, text, source_type, source_link, extra = extract(
+            source, lang=lang, pick_lang=pick_lang,
+            x_bearer_token=config.x_api.bearer_token,
+        )
     except NoTranscriptError:
         console.print("[yellow]no transcript found.[/yellow]")
         save = typer.confirm("save link anyway?")
@@ -214,4 +217,4 @@ def init():
     console.print(f"  config: {config_path}")
     console.print(f"  vault:  {config.vault_path}")
     console.print(f"  db:     {config.chromadb_path}")
-    console.print("\n[dim]edit ~/.metis/config.yaml to set your vault path and azure credentials.[/dim]")
+    console.print("\n[dim]edit ~/.metis/config.yaml to set your vault path and api keys.[/dim]")

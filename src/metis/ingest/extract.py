@@ -126,6 +126,133 @@ class NoTranscriptError(Exception):
         super().__init__(f"no transcript available for: {url}")
 
 
+def is_xtweet(url: str) -> bool:
+    """check if URL is an X/Twitter post."""
+    return bool(re.match(r"https?://(www\.)?(twitter\.com|x\.com)/\w+/status/\d+", url))
+
+
+def _extract_tweet_id(url: str) -> str:
+    """extract tweet ID from X/Twitter URL."""
+    match = re.search(r"/status/(\d+)", url)
+    if not match:
+        raise ValueError(f"could not parse tweet URL: {url}")
+    return match.group(1)
+
+
+def _extract_via_x_api(url: str, bearer_token: str) -> tuple[str, str, str | None]:
+    """extract tweet/thread/article via X API v2. returns (title, text, author)."""
+    tweet_id = _extract_tweet_id(url)
+
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+
+    response = httpx.get(
+        f"https://api.x.com/2/tweets/{tweet_id}",
+        headers=headers,
+        params={
+            "expansions": "author_id,referenced_tweets.id",
+            "tweet.fields": "text,conversation_id,created_at,entities,note_tweet,article",
+            "user.fields": "username,name",
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    tweet_data = data.get("data", {})
+    text = tweet_data.get("text", "")
+    conversation_id = tweet_data.get("conversation_id", "")
+
+    # get author from includes
+    users = {u["id"]: u for u in data.get("includes", {}).get("users", [])}
+    author_id = tweet_data.get("author_id", "")
+    author_info = users.get(author_id, {})
+    author = author_info.get("username", "unknown")
+    author_name = author_info.get("name", author)
+
+    # check for X article — full text is in article.plain_text
+    article = tweet_data.get("article")
+    if article:
+        article_text = article.get("plain_text", "")
+        article_title = article.get("title", f"@{author_name}")
+        if article_text:
+            return article_title, article_text, author
+
+    # if this is part of a thread, fetch the full conversation
+    if conversation_id and conversation_id != tweet_id:
+        thread_text = _fetch_thread(conversation_id, bearer_token)
+        if thread_text:
+            text = thread_text
+
+    title = f"@{author_name}"
+    return title, text, author
+
+
+def _fetch_thread(conversation_id: str, bearer_token: str) -> str | None:
+    """fetch all tweets in a conversation thread."""
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+
+    response = httpx.get(
+        "https://api.x.com/2/tweets/search/recent",
+        headers=headers,
+        params={
+            "query": f"conversation_id:{conversation_id}",
+            "tweet.fields": "text,created_at",
+            "max_results": 100,
+        },
+        timeout=15,
+    )
+
+    if response.status_code != 200:
+        return None
+
+    data = response.json()
+    tweets = data.get("data", [])
+    if not tweets:
+        return None
+
+    # sort by creation time and join
+    tweets.sort(key=lambda t: t.get("created_at", ""))
+    return "\n\n".join(t.get("text", "") for t in tweets)
+
+
+def _extract_via_oembed(url: str) -> tuple[str, str, str | None]:
+    """extract tweet text via oembed (no auth). returns (title, text, author)."""
+    response = httpx.get(
+        "https://publish.twitter.com/oembed",
+        params={"url": url, "format": "json"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    author = data.get("author_name", "unknown")
+    # html field contains the tweet in a blockquote — strip tags
+    html = data.get("html", "")
+    text = re.sub(r"<[^>]+>", "", html).strip()
+    text = re.sub(r"\n\s*\n", "\n\n", text).strip()
+
+    if not text:
+        raise ValueError(f"could not extract text from tweet: {url}")
+
+    title = f"@{author}"
+    return title, text, author
+
+
+def extract_from_xtweet(url: str, bearer_token: str = "") -> tuple[str, str, str | None]:
+    """extract tweet text. uses X API if token provided, oembed otherwise.
+
+    returns (title, text, author).
+    """
+    if bearer_token:
+        try:
+            return _extract_via_x_api(url, bearer_token)
+        except Exception as e:
+            from rich.console import Console
+            Console().print(f"[yellow]X API failed ({e}), falling back to oembed[/yellow]")
+
+    return _extract_via_oembed(url)
+
+
 def is_arxiv(url: str) -> bool:
     """check if URL is an arxiv paper."""
     return bool(re.match(r"https?://(www\.)?arxiv\.org/(abs|pdf)/", url))
@@ -228,6 +355,7 @@ def extract(
     source: str,
     lang: str | None = None,
     pick_lang: bool = False,
+    x_bearer_token: str = "",
 ) -> tuple[str, str, str, str, dict | None]:
     """extract text from any source.
 
@@ -240,6 +368,11 @@ def extract(
             title, text, channel = extract_from_youtube(source, lang=lang, pick_lang=pick_lang)
             extra = {"channel": channel} if channel else None
             return title, text, "youtube", source, extra
+
+        if is_xtweet(source):
+            title, text, author = extract_from_xtweet(source, bearer_token=x_bearer_token)
+            extra = {"author": author} if author else None
+            return title, text, "tweet", source, extra
 
         if is_arxiv(source):
             title, text = extract_from_arxiv(source)
