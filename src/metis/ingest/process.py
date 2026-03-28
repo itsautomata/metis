@@ -113,10 +113,23 @@ def chunk_text(text: str, max_chars: int = 1500, overlap: int = 200) -> list[str
     return safe_chunks if safe_chunks else [text[:max_chars]]
 
 
+SHORT_TEXT_THRESHOLD = 500
+
+
 def process(text: str, config: MetisConfig) -> ProcessedContent:
     """full processing pipeline: summarize, tag, chunk."""
-    summary, key_points, tags = summarize_and_tag(text, config)
     chunks = chunk_text(text)
+
+    # short text (tweets, quick notes) — skip LLM summarization
+    if len(text.strip()) < SHORT_TEXT_THRESHOLD:
+        return ProcessedContent(
+            summary=text.strip(),
+            key_points=[],
+            tags=[],
+            chunks=chunks,
+        )
+
+    summary, key_points, tags = summarize_and_tag(text, config)
 
     return ProcessedContent(
         summary=summary,
