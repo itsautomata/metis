@@ -15,6 +15,8 @@ uv venv
 source .venv/bin/activate
 uv pip install -e "."
 metis init
+metis --install-completion  # enable tab completion for commands
+exec $SHELL                # restart shell to apply
 ```
 
 edit `~/.metis/config.yaml` with your vault path and api key.

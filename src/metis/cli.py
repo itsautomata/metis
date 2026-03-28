@@ -16,10 +16,54 @@ app = typer.Typer(
 console = Console()
 
 
+def _complete_vault_folders(incomplete: str) -> list[str]:
+    """autocomplete vault subfolder paths."""
+    try:
+        config = load_config()
+        vault = config.vault_path
+        if not vault.exists():
+            return []
+
+        # list directories in vault
+        prefix = Path(incomplete) if incomplete else Path()
+        search_dir = vault / prefix.parent if incomplete else vault
+
+        if not search_dir.exists():
+            return []
+
+        results = []
+        for p in search_dir.iterdir():
+            if p.is_dir() and not p.name.startswith("."):
+                rel = str(p.relative_to(vault))
+                if rel.startswith(incomplete):
+                    results.append(rel)
+        return results
+    except Exception:
+        return []
+
+
+def _complete_vault_notes(incomplete: str) -> list[str]:
+    """autocomplete vault note paths (.md files)."""
+    try:
+        config = load_config()
+        vault = config.vault_path
+        if not vault.exists():
+            return []
+
+        results = []
+        for p in vault.rglob("*.md"):
+            rel = str(p.relative_to(vault))
+            if rel.startswith(incomplete):
+                results.append(rel)
+        return results
+    except Exception:
+        return []
+
+
 @app.command()
 def ingest(
     source: str = typer.Argument(help="file path or URL to ingest"),
-    folder: Optional[str] = typer.Option(None, "--folder", "-f", help="vault subfolder to save in"),
+    folder: Optional[str] = typer.Option(None, "--folder", "-f", help="vault subfolder to save in", autocompletion=_complete_vault_folders),
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="transcript language code (youtube)"),
     pick_lang: bool = typer.Option(False, "--pick-lang", help="interactively pick transcript language (youtube)"),
 ):
@@ -105,7 +149,7 @@ def search(
 @app.command()
 def chat(
     question: str = typer.Argument(help="question to ask your vault"),
-    note: Optional[str] = typer.Option(None, "--note", help="scope to a specific note"),
+    note: Optional[str] = typer.Option(None, "--note", help="scope to a specific note", autocompletion=_complete_vault_notes),
     save: bool = typer.Option(False, "--save", "-s", help="save Q&A to the note"),
 ):
     """RAG agent loop over your knowledge base."""
