@@ -218,7 +218,7 @@ def extract_from_markdown(path: Path) -> tuple[str, str]:
     """read markdown file. returns (title, text)."""
     text = path.read_text(encoding="utf-8")
 
-    title_match = re.match(r"^#\s+(.+)$", text, re.MULTILINE)
+    title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
     title = title_match.group(1) if title_match else path.stem.replace("-", " ").replace("_", " ")
 
     return title, text
