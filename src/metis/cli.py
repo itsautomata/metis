@@ -71,7 +71,8 @@ def ingest(
     from metis.ingest.extract import extract, NoTranscriptError
     from metis.ingest.process import process
     from metis.ingest.write import write_to_vault, write_link_only
-    from metis.index.store import store_chunks
+    from metis.index.embed import embed_texts
+    from metis.index.store import store_chunks_with_embeddings
 
     config = load_config()
     if folder:
@@ -113,14 +114,22 @@ def ingest(
     console.print(f"  tags:   {', '.join(processed.tags)}")
     console.print(f"  chunks: {len(processed.chunks)}")
 
-    # 3. write to vault
+    # 3. embed first — if this fails, vault stays clean
+    console.print("[dim]embedding and indexing...[/dim]")
+    try:
+        embeddings = embed_texts(processed.chunks, config)
+    except Exception as e:
+        console.print(f"[red]embedding failed: {e}[/red]")
+        console.print("[yellow]note was NOT saved. vault is unchanged.[/yellow]")
+        return
+
+    # 4. write to vault — only after embedding succeeds
     console.print("[dim]writing to vault...[/dim]")
     file_path = write_to_vault(title, text, source_link, source_type, processed, config, extra=extra)
     console.print(f"  saved: {file_path}")
 
-    # 4. embed + store
-    console.print("[dim]embedding and indexing...[/dim]")
-    n = store_chunks(processed.chunks, file_path, config)
+    # 5. store vectors with pre-computed embeddings
+    n = store_chunks_with_embeddings(processed.chunks, embeddings, file_path, config)
     console.print(f"  indexed: {n} chunks")
 
     # done

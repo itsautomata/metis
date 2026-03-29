@@ -46,3 +46,32 @@ def store_chunks(
     )
 
     return len(chunks)
+
+
+def store_chunks_with_embeddings(
+    chunks: list[str],
+    embeddings: list[list[float]],
+    file_path: Path,
+    config: MetisConfig,
+) -> int:
+    """store pre-computed chunks and embeddings in ChromaDB."""
+    if not chunks:
+        return 0
+
+    collection = _get_collection(config)
+
+    file_key = str(file_path)
+    ids = [f"{file_key}::chunk_{i}" for i in range(len(chunks))]
+    metadatas = [
+        {"file_path": file_key, "chunk_index": i}
+        for i in range(len(chunks))
+    ]
+
+    collection.upsert(
+        ids=ids,
+        embeddings=embeddings,
+        documents=chunks,
+        metadatas=metadatas,
+    )
+
+    return len(chunks)
