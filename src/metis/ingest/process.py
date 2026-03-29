@@ -55,11 +55,56 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
 
     parsed = json.loads(raw)
 
-    return (
-        parsed.get("summary", ""),
-        parsed.get("key_points", []),
-        parsed.get("tags", []),
-    )
+    summary = _sanitize_summary(parsed.get("summary", ""), text)
+    key_points = _sanitize_key_points(parsed.get("key_points", []))
+    tags = _sanitize_tags(parsed.get("tags", []))
+
+    return summary, key_points, tags
+
+
+SUSPICIOUS_PATTERNS = ["ignore", "system prompt", "you are", "disregard", "override", "pretend"]
+
+
+def _sanitize_tags(tags: list) -> list[str]:
+    """validate and clean LLM-generated tags."""
+    clean = []
+    for tag in tags:
+        if not isinstance(tag, str):
+            continue
+        tag = tag.lower().strip()
+        if len(tag) > 30:
+            continue
+        if " " in tag and "-" not in tag:
+            continue
+        if any(p in tag for p in SUSPICIOUS_PATTERNS):
+            continue
+        clean.append(tag)
+    return clean
+
+
+def _sanitize_summary(summary: str, original_text: str) -> str:
+    """validate LLM-generated summary."""
+    if not isinstance(summary, str):
+        return ""
+    if len(summary) > len(original_text):
+        return summary[:len(original_text)]
+    if any(p in summary.lower() for p in SUSPICIOUS_PATTERNS):
+        return ""
+    return summary
+
+
+def _sanitize_key_points(points: list) -> list[str]:
+    """validate LLM-generated key points."""
+    clean = []
+    for point in points:
+        if not isinstance(point, str):
+            continue
+        if len(point) > 300:
+            continue
+        if any(p in point.lower() for p in SUSPICIOUS_PATTERNS):
+            continue
+        clean.append(point)
+    return clean
 
 
 def chunk_text(text: str, max_chars: int = 1500, overlap: int = 200) -> list[str]:
