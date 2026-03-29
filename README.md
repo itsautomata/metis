@@ -19,7 +19,15 @@ metis --install-completion  # enable tab completion for commands
 exec $SHELL                # restart shell to apply
 ```
 
-edit `~/.metis/config.yaml` with your vault path and api key.
+store your api keys securely:
+
+```bash
+metis secret set openai-key
+metis secret set azure-key     # if using azure
+metis secret set x-token       # optional, for full x/twitter extraction
+```
+
+edit `~/.metis/config.yaml` for vault path and provider settings.
 
 ---
 
@@ -29,41 +37,19 @@ run `metis --help` or `metis <command> --help` for all options.
 
 ### ingest
 
-save anything to your vault: summarized, tagged, embedded, and linked back to the source.
+save anything to your vault — summarized, tagged, embedded, and linked back to the source.
 
 ```bash
 metis ingest https://en.wikipedia.org/wiki/Metis_(mythology)
 metis ingest ~/books/project-hail-mary.pdf
 metis ingest lecture-notes.md
-```
-
-**organize into folders:**
-
-```bash
 metis ingest paper.pdf --folder research/ai
-```
-
-defaults to `output_folder` in config if not specified.
-
-**youtube videos:**
-
-```bash
 metis ingest https://www.youtube.com/watch?v=abc123
-metis ingest https://www.youtube.com/watch?v=abc123 --lang fr
 metis ingest https://www.youtube.com/watch?v=abc123 --pick-lang
-```
-
-transcripts default to english. `--lang` picks a specific language. `--pick-lang` shows an interactive menu. if no transcript exists, metis asks if you want to save the link anyway.
-
-**arxiv papers:**
-
-```bash
 metis ingest https://arxiv.org/abs/2401.12345
 ```
 
-auto-detected. downloads the pdf, extracts text, grabs the paper title.
-
-**supported sources:** pdfs, urls, markdown, arxiv papers, youtube videos.
+supports pdfs, urls, markdown, arxiv papers, youtube videos, and x/twitter posts. `--folder` organizes into vault subfolders.
 
 ---
 
@@ -71,7 +57,6 @@ auto-detected. downloads the pdf, extracts text, grabs the paper title.
 
 ```bash
 metis search "what role did titans play in greek mythos"
-metis search "how does project hail mary handle the fermi paradox"
 ```
 
 semantic search. finds by meaning, not keywords.
@@ -82,9 +67,12 @@ semantic search. finds by meaning, not keywords.
 
 ```bash
 metis chat "how does project hail mary handle the fermi paradox?"
+metis chat "what does he say about nash equilibrium?" --note game_theory/intro
+metis chat "question" --note game_theory/intro --save
+metis chat "question" --expand
 ```
 
-answers grounded in your vault with sources cited. retrieves, reasons, retrieves again if needed.
+answers grounded in your vault with sources cited. `--note` scopes to a specific note. `--save` writes the Q&A into the note. `--expand` offers to search wikipedia when your vault doesn't have enough.
 
 ---
 
@@ -93,9 +81,10 @@ answers grounded in your vault with sources cited. retrieves, reasons, retrieves
 ```bash
 metis link
 metis link --write
+metis link --verbose
 ```
 
-discovers connections between notes. `--write` adds `[[wikilinks]]` to the files.
+discovers connections between notes. `--write` adds `[[wikilinks]]` to the files. `--verbose` explains why notes are connected.
 
 ---
 
@@ -119,12 +108,11 @@ output_folder: metis-ingested
 
 # option a: regular openai
 provider: openai
-openai:
-  api_key: sk-...
 
 # option b: azure openai
 provider: azure
 azure_openai:
   endpoint: https://your-resource.openai.azure.com/
-  api_key: your-key
 ```
+
+api keys are stored in your os keychain via `metis secret set`. also reads from environment variables or config file as fallback.
