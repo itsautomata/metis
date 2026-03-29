@@ -96,3 +96,40 @@ def test_save_qa_empty_answer(tmp_path):
     text = note.read_text()
     assert "**question?**" in text
     assert "## Content" in text
+
+
+# --- query simplification ---
+
+from metis.chat import _simplify_query
+
+
+def test_simplify_query_strips_stop_words():
+    result = _simplify_query("what does he say about nash equilibrium?")
+    assert "what" not in result
+    assert "does" not in result
+    assert "nash" in result
+    assert "equilibrium" in result
+
+
+def test_simplify_query_keeps_keywords():
+    result = _simplify_query("multi-agent coordination in dynamic environments")
+    assert "multi-agent" in result or "agent" in result
+    assert "coordination" in result
+    assert "dynamic" in result
+
+
+def test_simplify_query_limits_to_5():
+    result = _simplify_query("transformer attention mechanism self supervised learning neural network architecture")
+    words = result.split()
+    assert len(words) <= 5
+
+
+def test_simplify_query_empty():
+    result = _simplify_query("")
+    assert result == ""
+
+
+def test_simplify_query_all_stop_words():
+    result = _simplify_query("what is the a an")
+    # falls back to original since no keywords remain
+    assert result == "what is the a an"
