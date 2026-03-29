@@ -86,9 +86,10 @@ def ingest(
     # 1. extract
     console.print("[dim]extracting text...[/dim]")
     try:
+        from metis.secrets import get_x_bearer
         title, text, source_type, source_link, extra = extract(
             source, lang=lang, pick_lang=pick_lang,
-            x_bearer_token=config.x_api.bearer_token,
+            x_bearer_token=get_x_bearer(config.x_api.bearer_token),
         )
     except NoTranscriptError:
         console.print("[yellow]no transcript found.[/yellow]")
@@ -158,6 +159,7 @@ def chat(
     question: str = typer.Argument(help="question to ask your vault"),
     note: Optional[str] = typer.Option(None, "--note", help="scope to a specific note", autocompletion=_complete_vault_notes),
     save: bool = typer.Option(False, "--save", "-s", help="save Q&A to the note"),
+    expand: bool = typer.Option(False, "--expand", "-e", help="always offer external source search"),
 ):
     """RAG agent loop over your knowledge base."""
     from metis.chat import ask, save_qa_to_note, LOW_CONFIDENCE_THRESHOLD
@@ -195,7 +197,12 @@ def chat(
             console.print(f"  [dim]- {name}[/dim]")
 
     if confidence < LOW_CONFIDENCE_THRESHOLD:
-        console.print(f"\n[yellow]low confidence ({confidence:.2f}) — consider verifying against the source.[/yellow]")
+        console.print(f"\n[yellow]low confidence ({confidence:.2f})[/yellow]")
+
+    # offer external expansion — on low confidence or --expand flag
+    if expand or confidence < LOW_CONFIDENCE_THRESHOLD:
+        _offer_expand(clean_question, config, note_path, save)
+        return
 
     # save Q&A to note
     if save and note_path:
@@ -206,14 +213,93 @@ def chat(
         console.print("[yellow]--save requires --note to specify which note to save to.[/yellow]")
 
 
+def _offer_expand(question: str, config, note_path: str | None, save: bool):
+    """offer wikipedia search after a chat answer."""
+    from metis.expand import search_wikipedia, ingest_external, extract_search_keywords
+    from metis.chat import ask, save_qa_to_note
+
+    console.print()
+    choice = input("expand via wikipedia? [y/N]: ").strip().lower()
+
+    if choice != "y":
+        return
+
+    console.print("[dim]extracting search keywords...[/dim]")
+    keywords = extract_search_keywords(question, config)
+    console.print(f"  keywords: {keywords}")
+
+    try:
+        console.print("[dim]searching wikipedia...[/dim]")
+        results = search_wikipedia(keywords)
+    except Exception as e:
+        err = str(e)
+        if "429" in err:
+            console.print("[yellow]rate limited — wait a minute and try again.[/yellow]")
+        elif "timeout" in err.lower() or "ReadTimeout" in err:
+            console.print("[yellow]search timed out — try again later.[/yellow]")
+        else:
+            console.print(f"[red]search failed: {err}[/red]")
+        return
+
+    if not results:
+        console.print("[yellow]no results found.[/yellow]")
+        return
+
+    # show results
+    console.print(f"\n[bold]found {len(results)} results:[/bold]")
+    for i, r in enumerate(results, 1):
+        console.print(f"  [bold]{i}.[/bold] {r.title}")
+        console.print(f"     [dim]{r.preview}[/dim]")
+
+    pick = input(f"\npick [1]: ").strip()
+    if not pick:
+        pick = "1"
+    try:
+        idx = int(pick) - 1
+        if idx < 0 or idx >= len(results):
+            console.print("[red]invalid choice.[/red]")
+            return
+    except ValueError:
+        console.print("[red]invalid choice.[/red]")
+        return
+
+    best = results[idx]
+
+    # ingest and re-answer
+    console.print("[dim]ingesting...[/dim]")
+    file_path, _ = ingest_external(best, config)
+    console.print(f"  saved: {file_path}")
+
+    console.print("[dim]re-answering with new source...[/dim]\n")
+    answer, sources, confidence, _ = ask(question, config, note_path=note_path)
+
+    console.print(answer)
+    console.print()
+
+    if sources:
+        console.print("[dim]sources:[/dim]")
+        for s in sources:
+            name = Path(s).name
+            console.print(f"  [dim]- {name}[/dim]")
+
+    # save Q&A to note if requested
+    if save and note_path:
+        if typer.confirm("\nsave to note?"):
+            note_name = Path(file_path).stem
+            expanded_from = (best.source_type, note_name)
+            save_qa_to_note(note_path, question, answer, expanded_from=expanded_from)
+            console.print("[bold green]Q&A saved.[/bold green]")
+
+
 @app.command()
 def link(
     note: Optional[str] = typer.Argument(None, help="note to find connections for (all notes if omitted)"),
     write: bool = typer.Option(False, "--write", "-w", help="write wikilinks into notes"),
     min_score: float = typer.Option(0.7, "--min-score", help="minimum similarity score"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="explain why notes are connected"),
 ):
     """surface connections between notes."""
-    from metis.link import find_connections, write_links
+    from metis.link import find_connections, write_links, explain_connection
 
     config = load_config()
     target = note or "all notes"
@@ -226,9 +312,15 @@ def link(
         return
 
     for c in connections:
-        source_name = Path(c.source).stem
-        target_name = Path(c.target).stem
-        console.print(f"  [cyan]{source_name}[/cyan] → [cyan]{target_name}[/cyan] [{c.score}]")
+        source_rel = str(Path(c.source).relative_to(config.vault_path)) if config.vault_path in Path(c.source).parents else Path(c.source).name
+        target_rel = str(Path(c.target).relative_to(config.vault_path)) if config.vault_path in Path(c.target).parents else Path(c.target).name
+        # remove .md for cleaner display
+        source_rel = str(source_rel).removesuffix(".md")
+        target_rel = str(target_rel).removesuffix(".md")
+        console.print(f"  [cyan]{source_rel}[/cyan] → [cyan]{target_rel}[/cyan] [{c.score}]")
+        if verbose:
+            reason = explain_connection(c, config)
+            console.print(f"    [dim]{reason}[/dim]")
 
     console.print(f"\n{len(connections)} connections found.")
 
@@ -270,4 +362,42 @@ def init():
     console.print(f"  config: {config_path}")
     console.print(f"  vault:  {config.vault_path}")
     console.print(f"  db:     {config.chromadb_path}")
-    console.print("\n[dim]edit ~/.metis/config.yaml to set your vault path and api keys.[/dim]")
+    console.print("\n[dim]edit ~/.metis/config.yaml to set your vault path.[/dim]")
+    console.print("[dim]run 'metis secret set <name>' to store api keys securely.[/dim]")
+
+
+@app.command()
+def secret(
+    action: str = typer.Argument(help="'set' or 'delete'"),
+    name: str = typer.Argument(help="key name: openai-key, azure-key, x-token"),
+):
+    """manage api keys in the OS keychain."""
+    from metis.secrets import set_secret, delete_secret, OPENAI_KEY, AZURE_KEY, X_BEARER
+
+    key_map = {
+        "openai-key": OPENAI_KEY,
+        "azure-key": AZURE_KEY,
+        "x-token": X_BEARER,
+    }
+
+    if name not in key_map:
+        console.print(f"[red]unknown key: {name}. options: {', '.join(key_map.keys())}[/red]")
+        return
+
+    keychain_name = key_map[name]
+
+    if action == "set":
+        import getpass
+        value = getpass.getpass(f"enter {name}: ")
+        if not value:
+            console.print("[yellow]empty value, nothing saved.[/yellow]")
+            return
+        set_secret(keychain_name, value)
+        console.print(f"[bold green]{name} saved to keychain.[/bold green]")
+
+    elif action == "delete":
+        delete_secret(keychain_name)
+        console.print(f"[bold green]{name} removed from keychain.[/bold green]")
+
+    else:
+        console.print(f"[red]unknown action: {action}. use 'set' or 'delete'.[/red]")

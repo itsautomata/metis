@@ -155,17 +155,31 @@ def ask(
     return answer, all_sources, confidence, clean_question
 
 
-def format_qa_entry(question: str, answer: str) -> str:
-    """format a Q&A entry for saving to a note."""
+def format_qa_entry(question: str, answer: str, expanded_from: tuple[str, str] | None = None) -> str:
+    """format a Q&A entry for saving to a note.
+
+    expanded_from: optional (source_type, note_name) if external research was used.
+    """
     today = date.today().isoformat()
-    return f"\n**{question}** *(metis, {today})*\n{answer}\n"
+    entry = f"\n**{question}** *(metis, {today})*\n{answer}\n"
+
+    if expanded_from:
+        source_type, note_name = expanded_from
+        entry += f"\n*expanded via {source_type}: [[{note_name}]]*\n"
+
+    return entry
 
 
-def save_qa_to_note(note_path: str, question: str, answer: str) -> None:
+def save_qa_to_note(
+    note_path: str,
+    question: str,
+    answer: str,
+    expanded_from: tuple[str, str] | None = None,
+) -> None:
     """insert Q&A into the note, before the Transcript/Content section."""
     path = Path(note_path)
     text = path.read_text(encoding="utf-8")
-    entry = format_qa_entry(question, answer)
+    entry = format_qa_entry(question, answer, expanded_from=expanded_from)
 
     # find where to insert — before ## Transcript or ## Content
     insert_patterns = [r"\n## Transcript\b", r"\n## Content\b"]

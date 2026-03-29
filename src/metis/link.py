@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from metis.client import get_client, get_chat_model
 from metis.config import MetisConfig
 from metis.index.embed import embed_texts
 from metis.index.store import _get_collection
@@ -87,8 +88,11 @@ def find_connections(
             target_fp = results["metadatas"][0][i].get("file_path", "")
             target_name = _note_name(target_fp)
 
-            # skip self, already linked, already seen
+            # skip self (by path or by name), already linked, already seen
+            source_name = _note_name(source_fp)
             if target_fp == source_fp:
+                continue
+            if target_name == source_name:
                 continue
             if target_name in existing_links:
                 continue
@@ -117,6 +121,36 @@ def find_connections(
     return connections
 
 
+def explain_connection(connection: Connection, config: MetisConfig) -> str:
+    """explain why two notes are connected. one LLM call, one sentence."""
+    client = get_client(config)
+    model = get_chat_model(config)
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "you are given two text excerpts from different notes. "
+                    "explain in ONE short sentence why they are related. "
+                    "be specific. return ONLY the sentence, nothing else."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"note A:\n{connection.source_preview}\n\n"
+                    f"note B:\n{connection.target_preview}"
+                ),
+            },
+        ],
+        temperature=0.3,
+    )
+
+    return response.choices[0].message.content.strip()
+
+
 def write_links(connections: list[Connection]) -> int:
     """write [[wikilinks]] into source notes. returns count of links written."""
     written = 0
@@ -138,16 +172,21 @@ def write_links(connections: list[Connection]) -> int:
             target_name = _note_name(c.target)
             links_section += f"- [[{target_name}]] [{c.score}]\n"
 
-        # append or replace existing connections section
+        # insert or replace connections section — before Transcript/Content
         if "## Connections" in text:
             text = re.sub(
-                r"\n\n## Connections\n\n.*",
+                r"\n\n## Connections\n\n.*?(?=\n## |\Z)",
                 links_section,
                 text,
                 flags=re.DOTALL,
             )
         else:
-            text += links_section
+            # insert before Transcript or Content if they exist
+            insert_match = re.search(r"\n## (Transcript|Content)\b", text)
+            if insert_match:
+                text = text[:insert_match.start()] + links_section + text[insert_match.start():]
+            else:
+                text += links_section
 
         path.write_text(text, encoding="utf-8")
         written += len(conns)
