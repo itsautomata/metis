@@ -1,11 +1,45 @@
 """write processed content as markdown to the obsidian vault."""
 
+import json
 import re
 from datetime import date
 from pathlib import Path
 
-from metis.config import MetisConfig
+from metis.config import MetisConfig, CONFIG_DIR
 from metis.ingest.process import ProcessedContent
+
+SOURCES_INDEX_PATH = CONFIG_DIR / "sources.json"
+
+
+def _load_sources_index() -> dict[str, str]:
+    if SOURCES_INDEX_PATH.exists():
+        return json.loads(SOURCES_INDEX_PATH.read_text())
+    return {}
+
+
+def _save_sources_index(index: dict[str, str]) -> None:
+    SOURCES_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SOURCES_INDEX_PATH.write_text(json.dumps(index, indent=2))
+
+
+def check_duplicate(source_link: str) -> Path | None:
+    """check if source was already ingested. returns existing path or None."""
+    index = _load_sources_index()
+    existing = index.get(source_link)
+    if existing and Path(existing).exists():
+        return Path(existing)
+    # clean stale entry
+    if existing:
+        del index[source_link]
+        _save_sources_index(index)
+    return None
+
+
+def _register_source(source_link: str, file_path: Path) -> None:
+    """add source to the dedup index."""
+    index = _load_sources_index()
+    index[source_link] = str(file_path)
+    _save_sources_index(index)
 
 
 def slugify(title: str) -> str:
@@ -94,6 +128,7 @@ def write_to_vault(
 
     markdown = build_markdown(title, text, source_link, source_type, processed, extra=extra)
     file_path.write_text(markdown, encoding="utf-8")
+    _register_source(source_link, file_path)
 
     return file_path
 

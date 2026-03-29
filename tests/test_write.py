@@ -114,6 +114,46 @@ def test_write_to_vault_nested_folder(tmp_path):
     assert "research/ai/papers" in str(path)
 
 
+def test_dedup_detects_existing(tmp_path, monkeypatch):
+    """check_duplicate returns path when source was already ingested."""
+    from metis.ingest.write import check_duplicate, _save_sources_index, SOURCES_INDEX_PATH
+    index_path = tmp_path / "sources.json"
+    monkeypatch.setattr("metis.ingest.write.SOURCES_INDEX_PATH", index_path)
+
+    # simulate an existing note
+    note = tmp_path / "existing.md"
+    note.write_text("# test")
+    _save_sources_index({"https://example.com": str(note)})
+
+    result = check_duplicate("https://example.com")
+    assert result == note
+
+
+def test_dedup_returns_none_for_new(tmp_path, monkeypatch):
+    """check_duplicate returns None for never-ingested source."""
+    from metis.ingest.write import check_duplicate
+    index_path = tmp_path / "sources.json"
+    monkeypatch.setattr("metis.ingest.write.SOURCES_INDEX_PATH", index_path)
+
+    result = check_duplicate("https://new-url.com")
+    assert result is None
+
+
+def test_dedup_cleans_stale_entry(tmp_path, monkeypatch):
+    """if indexed file was deleted, check_duplicate cleans the entry."""
+    from metis.ingest.write import check_duplicate, _save_sources_index, _load_sources_index
+    index_path = tmp_path / "sources.json"
+    monkeypatch.setattr("metis.ingest.write.SOURCES_INDEX_PATH", index_path)
+
+    _save_sources_index({"https://example.com": "/nonexistent/path.md"})
+
+    result = check_duplicate("https://example.com")
+    assert result is None
+    # stale entry should be removed
+    index = _load_sources_index()
+    assert "https://example.com" not in index
+
+
 def test_write_link_only(tmp_path):
     config = MetisConfig(vault_path=tmp_path, output_folder="test-output")
 

@@ -70,7 +70,7 @@ def ingest(
     """save, summarize, tag, embed, and find links for a file or URL."""
     from metis.ingest.extract import extract, NoTranscriptError
     from metis.ingest.process import process
-    from metis.ingest.write import write_to_vault, write_link_only
+    from metis.ingest.write import write_to_vault, write_link_only, check_duplicate
     from metis.index.embed import embed_texts
     from metis.index.store import store_chunks_with_embeddings
 
@@ -81,6 +81,17 @@ def ingest(
             console.print(f"[red]folder must be inside the vault: {folder}[/red]")
             return
         config.output_folder = folder
+
+    # check for duplicate
+    existing = check_duplicate(source)
+    if existing:
+        console.print(f"[yellow]already ingested:[/yellow] {existing.name}")
+        if not typer.confirm("update?"):
+            return
+        # remove old vectors and note
+        from metis.index.sync import _remove_file_from_index
+        _remove_file_from_index(str(existing), config)
+        existing.unlink()
 
     console.print(f"[bold]ingesting:[/bold] {source}")
 
