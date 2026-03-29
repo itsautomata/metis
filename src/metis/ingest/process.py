@@ -36,24 +36,21 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
                     '- "summary": a one-paragraph summary (2-3 sentences max)\n'
                     '- "key_points": a list of 3-5 key points (short strings)\n'
                     '- "tags": a list of 3-7 lowercase tags (single words or hyphenated)\n'
-                    "return ONLY valid JSON, no markdown fencing."
                 ),
             },
             {"role": "user", "content": truncated},
         ],
         temperature=0.3,
+        response_format={"type": "json_object"},
     )
 
     raw = response.choices[0].message.content.strip()
 
-    # strip markdown fencing if present
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-        if raw.endswith("```"):
-            raw = raw[:-3]
-        raw = raw.strip()
-
-    parsed = json.loads(raw)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        # LLM returned invalid JSON despite response_format — fallback to empty metadata
+        return "", [], []
 
     summary = _sanitize_summary(parsed.get("summary", ""), text)
     key_points = _sanitize_key_points(parsed.get("key_points", []))
