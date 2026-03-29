@@ -1,21 +1,21 @@
 """shared OpenAI client factory. supports both openai and azure providers."""
 
-import os
-
 from openai import AzureOpenAI, OpenAI
 
 from metis.config import MetisConfig
+from metis.secrets import get_openai_key, get_azure_key
 
 
 def get_client(config: MetisConfig) -> OpenAI:
     """create the right client based on provider config.
 
     returns OpenAI or AzureOpenAI — same interface, different backend.
+    secret lookup: keychain → env var → config file.
     """
     if config.provider == "azure":
-        api_key = config.azure.api_key or os.environ.get("METIS_AZURE_KEY", "")
+        api_key = get_azure_key(config.azure.api_key)
         if not api_key:
-            raise ValueError("azure API key not set. edit ~/.metis/config.yaml or set METIS_AZURE_KEY")
+            raise ValueError("azure API key not set. run 'metis config set azure-key' or set METIS_AZURE_KEY")
         if not config.azure.endpoint:
             raise ValueError("azure endpoint not set. edit ~/.metis/config.yaml")
         return AzureOpenAI(
@@ -25,9 +25,9 @@ def get_client(config: MetisConfig) -> OpenAI:
         )
 
     # default: regular openai
-    api_key = config.openai.api_key or os.environ.get("METIS_OPENAI_KEY", "")
+    api_key = get_openai_key(config.openai.api_key)
     if not api_key:
-        raise ValueError("openai API key not set. edit ~/.metis/config.yaml or set METIS_OPENAI_KEY")
+        raise ValueError("openai API key not set. run 'metis config set openai-key' or set METIS_OPENAI_KEY")
     return OpenAI(api_key=api_key)
 
 

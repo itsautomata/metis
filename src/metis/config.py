@@ -66,11 +66,13 @@ class MetisConfig:
 
 def init_config() -> Path:
     """create or update config file with any missing sections. returns config path."""
+    import os
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     if not CONFIG_PATH.exists():
         with open(CONFIG_PATH, "w") as f:
             yaml.dump(DEFAULT_CONFIG, f, default_flow_style=False, sort_keys=False)
+        os.chmod(CONFIG_PATH, 0o600)  # owner-only read/write
     else:
         # merge missing keys into existing config
         with open(CONFIG_PATH) as f:
