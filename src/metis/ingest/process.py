@@ -104,10 +104,11 @@ def _sanitize_key_points(points: list) -> list[str]:
     return clean
 
 
-def chunk_text(text: str, max_chars: int = 1500, overlap: int = 200) -> list[str]:
+def chunk_text(text: str, max_chars: int = 1500) -> list[str]:
     """split text into overlapping chunks at paragraph or line boundaries.
 
     targets ~500 tokens per chunk (roughly 1500 chars).
+    overlap: last ~30 words of each chunk carry into the next.
     handles both paragraph-based text (articles) and line-based text (transcripts).
     """
     # split on double newlines first, then fall back to single newlines

@@ -99,14 +99,14 @@ def write_to_vault(
 
 
 def write_link_only(url: str, config: MetisConfig) -> Path:
-    """write a minimal link-only note (no summary, no embedding)."""
-    today = date.today().isoformat()
+    """write a link-only note via the standard write path."""
+    import httpx
+
     title = url.split("/")[-1] if "/" in url else url
 
     # try to get a title via oembed for youtube
     if "youtube.com" in url or "youtu.be" in url:
         try:
-            import httpx
             resp = httpx.get(
                 "https://www.youtube.com/oembed",
                 params={"url": url, "format": "json"},
@@ -117,27 +117,11 @@ def write_link_only(url: str, config: MetisConfig) -> Path:
         except Exception:
             pass
 
-    slug = slugify(title)
-    output_dir = config.vault_path / config.output_folder
-    output_dir.mkdir(parents=True, exist_ok=True)
-    file_path = output_dir / f"{slug}.md"
-
-    counter = 1
-    while file_path.exists():
-        file_path = output_dir / f"{slug}-{counter}.md"
-        counter += 1
-
-    markdown = (
-        f"---\n"
-        f"source: \"{url}\"\n"
-        f"ingested: {today}\n"
-        f"tags: []\n"
-        f"type: link\n"
-        f"---\n\n"
-        f"# {title}\n\n"
-        f"> [source]({url})\n\n"
-        f"*link only — no transcript available at time of ingest.*\n"
+    empty = ProcessedContent(
+        summary="link only — no transcript available at time of ingest.",
+        key_points=[],
+        tags=[],
+        chunks=[],
     )
 
-    file_path.write_text(markdown, encoding="utf-8")
-    return file_path
+    return write_to_vault(title, "", url, "link", empty, config)
