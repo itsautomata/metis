@@ -183,6 +183,9 @@ def chat(
             note_p = note_p.with_suffix(".md")
         if not note_p.is_absolute():
             note_p = config.vault_path / note_p
+        if not note_p.resolve().is_relative_to(config.vault_path.resolve()):
+            console.print(f"[red]note must be inside the vault: {note}[/red]")
+            return
         note_path = str(note_p)
         if not note_p.exists():
             console.print(f"[red]note not found: {note_path}[/red]")
@@ -190,11 +193,7 @@ def chat(
 
     console.print(f"[bold]asking:[/bold] {question}\n")
 
-    answer, sources, confidence, clean_question = ask(question, config, note_path=note_path)
-
-    # show reformulated query if different
-    if clean_question.lower().strip("?. ") != question.lower().strip("?. "):
-        console.print(f"[dim]query: {clean_question}[/dim]\n")
+    answer, sources, confidence = ask(question, config, note_path=note_path)
 
     console.print(answer)
     console.print()
@@ -210,13 +209,13 @@ def chat(
 
     # offer external expansion — on low confidence or --expand flag
     if expand or confidence < LOW_CONFIDENCE_THRESHOLD:
-        _offer_expand(clean_question, config, note_path, save)
+        _offer_expand(question, config, note_path, save)
         return
 
     # save Q&A to note
     if save and note_path:
         if typer.confirm("\nsave to note?"):
-            save_qa_to_note(note_path, clean_question, answer)
+            save_qa_to_note(note_path, question, answer)
             console.print("[bold green]Q&A saved.[/bold green]")
     elif save and not note_path:
         console.print("[yellow]--save requires --note to specify which note to save to.[/yellow]")
@@ -280,7 +279,7 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
     console.print(f"  saved: {file_path}")
 
     console.print("[dim]re-answering with new source...[/dim]\n")
-    answer, sources, confidence, _ = ask(question, config, note_path=note_path)
+    answer, sources, confidence = ask(question, config, note_path=note_path)
 
     console.print(answer)
     console.print()

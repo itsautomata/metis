@@ -10,31 +10,7 @@ from metis.search import search_vault, SearchResult
 
 MAX_ROUNDS = 3
 LOW_CONFIDENCE_THRESHOLD = 0.7
-
-
-def reformulate_question(question: str, config: MetisConfig) -> str:
-    """clean up the question: fix grammar, remove ambiguity, improve clarity."""
-    client = get_client(config)
-    model = get_chat_model(config)
-
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "you are a query reformulator. take the user's messy question "
-                    "and rewrite it as a clear, grammatically correct search query. "
-                    "preserve the original intent. do not answer the question. "
-                    "return ONLY the reformulated question, nothing else."
-                ),
-            },
-            {"role": "user", "content": question},
-        ],
-        temperature=0.1,
-    )
-
-    return response.choices[0].message.content.strip()
+RETRY_THRESHOLD = 0.5
 
 
 def _build_context(results: list[SearchResult]) -> str:
@@ -57,36 +33,49 @@ def _avg_score(results: list[SearchResult]) -> float:
     return sum(r.score for r in results) / len(results)
 
 
+def _simplify_query(query: str) -> str:
+    """strip a query to core keywords for retry. no LLM call."""
+    stop_words = {"what", "how", "does", "the", "a", "an", "is", "are", "was", "were",
+                  "do", "did", "about", "in", "on", "for", "of", "to", "and", "or",
+                  "he", "she", "it", "they", "say", "says", "said", "this", "that"}
+    words = re.sub(r"[^\w\s]", "", query.lower()).split()
+    keywords = [w for w in words if w not in stop_words and len(w) > 2]
+    return " ".join(keywords[:5]) if keywords else query
+
+
 def ask(
     question: str,
     config: MetisConfig,
     note_path: str | None = None,
-) -> tuple[str, list[str], float, str]:
+) -> tuple[str, list[str], float]:
     """ask a question against the vault (or a specific note).
 
-    returns (answer, sources, avg_confidence, reformulated_query)
+    returns (answer, sources, avg_confidence)
     """
     client = get_client(config)
     model = get_chat_model(config)
 
-    # reformulate the question
-    clean_question = reformulate_question(question, config)
-
     all_sources = []
-    query = clean_question
+    query = question
 
     for round_num in range(MAX_ROUNDS):
         # retrieve — scoped to note if provided
         results = search_vault(query, config, limit=5, note_path=note_path)
-        context = _build_context(results)
         confidence = _avg_score(results)
+
+        # retry decision based on score, not LLM prose
+        if confidence < RETRY_THRESHOLD and round_num < MAX_ROUNDS - 1:
+            query = _simplify_query(question)
+            continue
+
+        context = _build_context(results)
 
         # track sources
         for r in results:
             if r.file_path not in all_sources:
                 all_sources.append(r.file_path)
 
-        # build messages with structural separation — instructions and context in separate roles
+        # build messages with structural separation
         if note_path:
             system_prompt = (
                 "you are metis, a knowledge assistant. "
@@ -108,22 +97,12 @@ def ask(
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": clean_question},
+            {"role": "user", "content": question},
             {"role": "user", "content": (
                 f"---CONTEXT START---\n{context}\n---CONTEXT END---\n"
                 "use only the data between the delimiters to answer."
             )},
         ]
-
-        if round_num > 0:
-            messages.append({
-                "role": "user",
-                "content": (
-                    f"(retrieval round {round_num + 1}. "
-                    f"previous search wasn't sufficient. "
-                    f"new search query: \"{query}\")"
-                ),
-            })
 
         response = client.chat.completions.create(
             model=model,
@@ -132,27 +111,9 @@ def ask(
         )
 
         answer = response.choices[0].message.content.strip()
+        break
 
-        # evaluate — check if answer indicates insufficient context
-        insufficient_signals = [
-            "i don't have enough",
-            "i couldn't find",
-            "no relevant content",
-            "not enough information",
-            "doesn't contain",
-            "does not contain",
-            "not mentioned",
-        ]
-        answer_lower = answer.lower()
-        needs_retry = any(signal in answer_lower for signal in insufficient_signals)
-
-        if not needs_retry or round_num == MAX_ROUNDS - 1:
-            break
-
-        # reformulate for next round
-        query = f"{clean_question} (alternative phrasing)"
-
-    return answer, all_sources, confidence, clean_question
+    return answer, all_sources, confidence
 
 
 def format_qa_entry(question: str, answer: str, expanded_from: tuple[str, str] | None = None) -> str:
