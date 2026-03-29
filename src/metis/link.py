@@ -7,7 +7,7 @@ from pathlib import Path
 from metis.client import get_client, get_chat_model
 from metis.config import MetisConfig
 from metis.index.embed import embed_texts
-from metis.index.store import _get_collection
+from metis.index.store import get_collection
 
 
 @dataclass
@@ -43,7 +43,7 @@ def find_connections(
     if note_path is given, find connections for that note.
     if None, find connections across all notes.
     """
-    collection = _get_collection(config)
+    collection = get_collection(config)
 
     if collection.count() == 0:
         return []

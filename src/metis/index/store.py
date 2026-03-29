@@ -10,7 +10,7 @@ from metis.index.embed import embed_texts
 COLLECTION_NAME = "metis_vault"
 
 
-def _get_collection(config: MetisConfig) -> chromadb.Collection:
+def get_collection(config: MetisConfig) -> chromadb.Collection:
     config.chromadb_path.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(config.chromadb_path))
     return client.get_or_create_collection(
@@ -28,7 +28,7 @@ def store_chunks(
     if not chunks:
         return 0
 
-    collection = _get_collection(config)
+    collection = get_collection(config)
     embeddings = embed_texts(chunks, config)
 
     file_key = str(file_path)
@@ -58,7 +58,7 @@ def store_chunks_with_embeddings(
     if not chunks:
         return 0
 
-    collection = _get_collection(config)
+    collection = get_collection(config)
 
     file_key = str(file_path)
     ids = [f"{file_key}::chunk_{i}" for i in range(len(chunks))]

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from metis.config import MetisConfig
 from metis.index.embed import embed_texts
-from metis.index.store import _get_collection
+from metis.index.store import get_collection
 
 
 @dataclass
@@ -26,7 +26,7 @@ def search_vault(
 
     if note_path is given, only search within that note's chunks.
     """
-    collection = _get_collection(config)
+    collection = get_collection(config)
 
     if collection.count() == 0:
         return []

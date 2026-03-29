@@ -7,7 +7,7 @@ from pathlib import Path
 
 from metis.config import MetisConfig, CONFIG_DIR
 from metis.ingest.process import chunk_text
-from metis.index.store import store_chunks, _get_collection
+from metis.index.store import store_chunks, get_collection
 
 SYNC_STATE_PATH = CONFIG_DIR / "sync_state.json"
 
@@ -47,7 +47,7 @@ def _find_vault_files(config: MetisConfig) -> list[Path]:
 
 def _remove_file_from_index(file_path: str, config: MetisConfig) -> int:
     """remove all chunks for a file from chromadb. returns count removed."""
-    collection = _get_collection(config)
+    collection = get_collection(config)
 
     # find all chunk IDs for this file
     results = collection.get(
