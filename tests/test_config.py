@@ -32,7 +32,8 @@ def test_init_creates_config(tmp_path, monkeypatch):
     assert "azure_openai" in raw
 
 
-def test_init_does_not_overwrite(tmp_path, monkeypatch):
+def test_init_preserves_existing_and_adds_missing(tmp_path, monkeypatch):
+    """init should keep existing keys and add missing ones."""
     config_dir = tmp_path / ".metis"
     config_dir.mkdir()
     config_path = config_dir / "config.yaml"
@@ -41,7 +42,9 @@ def test_init_does_not_overwrite(tmp_path, monkeypatch):
     monkeypatch.setattr("metis.config.CONFIG_PATH", config_path)
 
     init_config()
-    assert config_path.read_text() == "custom: true"
+    text = config_path.read_text()
+    assert "custom: true" in text
+    assert "provider:" in text
 
 
 def test_load_config_openai(tmp_path, monkeypatch):
