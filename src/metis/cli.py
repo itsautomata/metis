@@ -75,6 +75,10 @@ def ingest(
 
     config = load_config()
     if folder:
+        resolved = (config.vault_path / folder).resolve()
+        if not resolved.is_relative_to(config.vault_path.resolve()):
+            console.print(f"[red]folder must be inside the vault: {folder}[/red]")
+            return
         config.output_folder = folder
 
     console.print(f"[bold]ingesting:[/bold] {source}")
@@ -93,6 +97,9 @@ def ingest(
             file_path = write_link_only(source, config)
             console.print(f"[bold green]link saved.[/bold green]")
             console.print(f"  note: {file_path}")
+        return
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]{e}[/red]")
         return
 
     console.print(f"  title: {title}")
