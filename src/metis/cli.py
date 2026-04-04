@@ -64,6 +64,7 @@ def _complete_vault_notes(incomplete: str) -> list[str]:
 def ingest(
     source: str = typer.Argument(help="file path or URL to ingest"),
     folder: Optional[str] = typer.Option(None, "--folder", "-f", help="vault subfolder to save in", autocompletion=_complete_vault_folders),
+    pick_folder_flag: bool = typer.Option(False, "--pick-folder", help="interactively pick vault folder"),
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="transcript language code (youtube)"),
     pick_lang: bool = typer.Option(False, "--pick-lang", help="interactively pick transcript language (youtube)"),
 ):
@@ -75,6 +76,11 @@ def ingest(
     from metis.index.store import store_chunks_with_embeddings
 
     config = load_config()
+
+    if pick_folder_flag and not folder:
+        from metis.pick import pick_folder
+        folder = pick_folder(config)
+
     if folder:
         resolved = (config.vault_path / folder).resolve()
         if not resolved.is_relative_to(config.vault_path.resolve()):
@@ -173,11 +179,26 @@ def search(
         console.print(f"   {preview}...")
         console.print()
 
+    # interactive: pick a result to chat about
+    from metis.pick import pick_search_result
+    selected = pick_search_result(results, config)
+    if selected:
+        console.print(f"\n[bold]opening chat for:[/bold] {Path(selected).stem}\n")
+        from metis.chat import ask
+        answer, sources, confidence = ask(query, config, note_path=selected)
+        console.print(answer)
+        console.print()
+        if sources:
+            console.print("[dim]sources:[/dim]")
+            for s in sources:
+                console.print(f"  [dim]- {Path(s).name}[/dim]")
+
 
 @app.command()
 def chat(
     question: str = typer.Argument(help="question to ask your vault"),
     note: Optional[str] = typer.Option(None, "--note", help="scope to a specific note", autocompletion=_complete_vault_notes),
+    pick: bool = typer.Option(False, "--pick", "-p", help="interactively pick a note"),
     save: bool = typer.Option(False, "--save", "-s", help="save Q&A to the note"),
     expand: bool = typer.Option(False, "--expand", "-e", help="always offer external source search"),
 ):
@@ -185,6 +206,12 @@ def chat(
     from metis.chat import ask, save_qa_to_note, LOW_CONFIDENCE_THRESHOLD
 
     config = load_config()
+
+    if pick and not note:
+        from metis.pick import pick_note
+        note = pick_note(config)
+        if not note:
+            return
 
     # resolve note path
     note_path = None

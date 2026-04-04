@@ -5,4 +5,4 @@ __pycache__/
 dist/
 build/
 .metis/
-local_docs/
+local_docs
