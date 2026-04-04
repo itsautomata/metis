@@ -325,20 +325,117 @@ def extract_from_pdf(path: Path) -> tuple[str, str]:
     return title, text
 
 
-def extract_from_url(url: str) -> tuple[str, str]:
-    """extract article text from URL. returns (title, text)."""
-    downloaded = trafilatura.fetch_url(url)
-    if not downloaded:
-        raise ValueError(f"could not fetch URL: {url}")
+def _extract_distill(html: str) -> tuple[str, str] | None:
+    """extract from Distill.js format (used by transformer-circuits.pub, distill.pub, etc.).
 
-    text = trafilatura.extract(downloaded, include_comments=False, include_tables=True)
+    returns (title, text) or None if not a Distill paper.
+    """
+    if "<d-article>" not in html:
+        return None
+
+    # title from d-front-matter JSON
+    title = "untitled"
+    fm_match = re.search(r"<d-front-matter>.*?<script[^>]*>(.*?)</script>", html, re.DOTALL)
+    if fm_match:
+        try:
+            import json
+            fm = json.loads(fm_match.group(1))
+            title = fm.get("title", title)
+        except Exception:
+            pass
+
+    # fallback: <title> tag
+    if title == "untitled":
+        title_match = re.search(r"<title>(.*?)</title>", html)
+        if title_match:
+            title = title_match.group(1).strip()
+
+    # article body from <d-article>
+    article_match = re.search(r"<d-article>(.*?)</d-article>", html, re.DOTALL)
+    if not article_match:
+        return None
+
+    article_html = article_match.group(1)
+
+    # strip tags but preserve structure
+    # convert block elements to newlines first
+    text = re.sub(r"<(p|h[1-6]|li|dt|dd|figcaption)[^>]*>", "\n", article_html)
+    text = re.sub(r"</(p|h[1-6]|li|dt|dd|figcaption)>", "\n", text)
+    text = re.sub(r"<br\s*/?>", "\n", text)
+    text = re.sub(r"<d-math[^>]*>.*?</d-math>", "[math]", text, flags=re.DOTALL)
+    text = re.sub(r"<d-figure[^>]*>.*?</d-figure>", "\n[figure]\n", text, flags=re.DOTALL)
+    text = re.sub(r"<d-footnote[^>]*>(.*?)</d-footnote>", r" [\1]", text, flags=re.DOTALL)
+    text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
+    # strip remaining tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # clean up whitespace
+    text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+    text = text.strip()
+
     if not text:
-        raise ValueError(f"could not extract text from: {url}")
-
-    metadata = trafilatura.extract_metadata(downloaded)
-    title = metadata.title if metadata and metadata.title else _title_from_url(url)
+        return None
 
     return title, text
+
+
+def _extract_with_httpx(url: str) -> tuple[str, str] | None:
+    """last-resort extraction: fetch with httpx, strip HTML tags.
+
+    returns (title, text) or None.
+    """
+    try:
+        response = httpx.get(url, follow_redirects=True, timeout=30,
+                           headers={"User-Agent": "metis/0.1.0"})
+        response.raise_for_status()
+    except Exception:
+        return None
+
+    html = response.text
+
+    # try distill format first
+    distill = _extract_distill(html)
+    if distill:
+        return distill
+
+    # generic: get title + strip body
+    title_match = re.search(r"<title>(.*?)</title>", html)
+    title = title_match.group(1).strip() if title_match else _title_from_url(url)
+
+    # remove script, style, nav, header, footer
+    for tag in ["script", "style", "nav", "header", "footer", "aside"]:
+        html = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", "", html, flags=re.DOTALL)
+
+    # strip tags
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if len(text) < 50:
+        return None
+
+    return title, text
+
+
+def extract_from_url(url: str) -> tuple[str, str]:
+    """extract article text from URL. returns (title, text).
+
+    fallback chain: trafilatura → distill.js extractor → httpx + tag stripping.
+    """
+    # 1. trafilatura (best for standard articles)
+    downloaded = trafilatura.fetch_url(url)
+    if downloaded:
+        text = trafilatura.extract(downloaded, include_comments=False, include_tables=True)
+        if text:
+            metadata = trafilatura.extract_metadata(downloaded)
+            title = metadata.title if metadata and metadata.title else _title_from_url(url)
+            return title, text
+
+    # 2. httpx fallback (handles distill.js + large pages trafilatura can't fetch)
+    result = _extract_with_httpx(url)
+    if result:
+        return result
+
+    raise ValueError(f"could not extract text from: {url}")
 
 
 def extract_from_markdown(path: Path) -> tuple[str, str]:
