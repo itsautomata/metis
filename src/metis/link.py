@@ -65,16 +65,21 @@ def find_connections(
         source_paths = list(file_chunks.keys())
 
     connections = []
+    seen_pairs = set()
 
-    for source_fp in source_paths:
-        if source_fp not in file_chunks:
-            continue
+    # filter to valid source paths
+    valid_sources = [fp for fp in source_paths if fp in file_chunks]
+    if not valid_sources:
+        return []
 
+    # batch embed all source texts in one call
+    source_texts = [file_chunks[fp] for fp in valid_sources]
+    source_embeddings = embed_texts(source_texts, config)
+
+    for source_fp, query_embedding in zip(valid_sources, source_embeddings):
         source_text = file_chunks[source_fp]
         existing_links = _get_existing_links(Path(source_fp))
 
-        # embed and search
-        query_embedding = embed_texts([source_text], config)[0]
         n_results = min(limit + len(existing_links) + 1, collection.count())
 
         results = collection.query(
@@ -98,6 +103,9 @@ def find_connections(
                 continue
             if target_fp in seen_targets:
                 continue
+            pair = tuple(sorted([source_fp, target_fp]))
+            if pair in seen_pairs:
+                continue
 
             distance = results["distances"][0][i] if results["distances"] else 1
             score = round(1 - distance, 3)
@@ -106,6 +114,7 @@ def find_connections(
                 continue
 
             seen_targets.add(target_fp)
+            seen_pairs.add(pair)
             connections.append(Connection(
                 source=source_fp,
                 target=target_fp,
