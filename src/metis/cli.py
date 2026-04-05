@@ -245,18 +245,15 @@ def chat(
     if confidence < LOW_CONFIDENCE_THRESHOLD:
         console.print(f"\n[yellow]low confidence ({confidence:.2f})[/yellow]")
 
+    # save Q&A to note — always offer when --note is used
+    if note_path:
+        if save or typer.confirm("\nsave to note?"):
+            save_qa_to_note(note_path, question, answer)
+            console.print("[bold green]Q&A saved.[/bold green]")
+
     # offer external expansion — on low confidence or --expand flag
     if expand or confidence < LOW_CONFIDENCE_THRESHOLD:
         _offer_expand(question, config, note_path, save)
-        return
-
-    # save Q&A to note
-    if save and note_path:
-        if typer.confirm("\nsave to note?"):
-            save_qa_to_note(note_path, question, answer)
-            console.print("[bold green]Q&A saved.[/bold green]")
-    elif save and not note_path:
-        console.print("[yellow]--save requires --note to specify which note to save to.[/yellow]")
 
 
 def _offer_expand(question: str, config, note_path: str | None, save: bool):
@@ -291,25 +288,15 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
         console.print("[yellow]no results found.[/yellow]")
         return
 
-    # show results
-    console.print(f"\n[bold]found {len(results)} results:[/bold]")
-    for i, r in enumerate(results, 1):
-        console.print(f"  [bold]{i}.[/bold] {r.title}")
-        console.print(f"     [dim]{r.preview}[/dim]")
+    # interactive picker for wikipedia results
+    from metis.pick import pick_wikipedia
+    wiki_choices = [(r.title, r.preview) for r in results]
+    picked_title = pick_wikipedia(wiki_choices)
 
-    pick = input(f"\npick [1]: ").strip()
-    if not pick:
-        pick = "1"
-    try:
-        idx = int(pick) - 1
-        if idx < 0 or idx >= len(results):
-            console.print("[red]invalid choice.[/red]")
-            return
-    except ValueError:
-        console.print("[red]invalid choice.[/red]")
+    if not picked_title:
         return
 
-    best = results[idx]
+    best = next(r for r in results if r.title == picked_title)
 
     # ingest and re-answer
     console.print("[dim]ingesting...[/dim]")
@@ -340,6 +327,7 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
 @app.command()
 def link(
     note: Optional[str] = typer.Argument(None, help="note to find connections for (all notes if omitted)"),
+    pick: bool = typer.Option(False, "--pick", "-p", help="interactively pick a note"),
     write: bool = typer.Option(False, "--write", "-w", help="write wikilinks into notes"),
     min_score: float = typer.Option(0.7, "--min-score", help="minimum similarity score"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="explain why notes are connected"),
@@ -348,10 +336,27 @@ def link(
     from metis.link import find_connections, write_links, explain_connection
 
     config = load_config()
+
+    if pick and not note:
+        from metis.pick import pick_note
+        note = pick_note(config)
+        if not note:
+            return
+
+    # resolve note to full path for chromadb matching
+    note_path = None
+    if note:
+        note_p = Path(note).expanduser()
+        if not note_p.suffix:
+            note_p = note_p.with_suffix(".md")
+        if not note_p.is_absolute():
+            note_p = config.vault_path / note_p
+        note_path = str(note_p)
+
     target = note or "all notes"
     console.print(f"[bold]linking:[/bold] {target}\n")
 
-    connections = find_connections(config, note_path=note, min_score=min_score)
+    connections = find_connections(config, note_path=note_path, min_score=min_score)
 
     if not connections:
         console.print("[yellow]no connections found above threshold.[/yellow]")
@@ -415,7 +420,7 @@ def init():
 @app.command()
 def secret(
     action: str = typer.Argument(help="'set' or 'delete'"),
-    name: str = typer.Argument(help="key name: openai-key, azure-key, x-token"),
+    name: Optional[str] = typer.Argument(None, help="key name: openai-key, azure-key, x-token"),
 ):
     """manage api keys in the OS keychain."""
     from metis.secrets import set_secret, delete_secret, OPENAI_KEY, AZURE_KEY, X_BEARER
@@ -425,6 +430,13 @@ def secret(
         "azure-key": AZURE_KEY,
         "x-token": X_BEARER,
     }
+
+    # interactive picker if no name given
+    if not name:
+        from metis.pick import pick_secret
+        name = pick_secret(list(key_map.keys()))
+        if not name:
+            return
 
     if name not in key_map:
         console.print(f"[red]unknown key: {name}. options: {', '.join(key_map.keys())}[/red]")
