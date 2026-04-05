@@ -57,7 +57,7 @@ metis ingest https://arxiv.org/abs/2401.12345
 
 supports pdfs, urls, markdown, arxiv papers, youtube videos, and x/twitter posts. `--folder` organizes into vault subfolders.
 
-interactive: `--pick-folder` choose which vault folder to save in. `--pick-lang` choose which transcript language to use.
+> interactive: `--pick-folder` (vault folders) / `--pick-lang` (transcript languages)
 
 ---
 
@@ -82,7 +82,7 @@ metis chat "question" --expand
 
 answers grounded in your vault with sources cited. `--note` scopes to a specific note and offers to save the Q&A. `--save` saves without prompting. `--expand` searches wikipedia when your vault doesn't have enough.
 
-interactive: `--pick` choose which vault note to ask about.
+> interactive: `--pick` (choose vault note to ask about)
 
 ---
 
@@ -96,7 +96,7 @@ metis link --verbose
 
 discovers connections between notes. `--write` adds `[[wikilinks]]` to the files. `--verbose` explains why notes are connected.
 
-interactive: `--pick` choose which vault note to find connections for.
+> interactive: `--pick` (choose vault note to find connections for)
 
 ---
 
