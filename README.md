@@ -31,6 +31,7 @@ store your api keys securely:
 metis secret set openai-key
 metis secret set azure-key     # if using azure
 metis secret set x-token       # optional, for full x/twitter extraction
+metis secret set               # interactive — pick which key
 ```
 
 edit `~/.metis/config.yaml` for vault path and provider settings.
@@ -50,12 +51,13 @@ metis ingest https://en.wikipedia.org/wiki/Metis_(mythology)
 metis ingest ~/books/project-hail-mary.pdf
 metis ingest lecture-notes.md
 metis ingest paper.pdf --folder research/ai
-metis ingest https://www.youtube.com/watch?v=abc123
-metis ingest https://www.youtube.com/watch?v=abc123 --pick-lang
+metis ingest https://www.youtube.com/watch?v=abc123 --lang fr
 metis ingest https://arxiv.org/abs/2401.12345
 ```
 
 supports pdfs, urls, markdown, arxiv papers, youtube videos, and x/twitter posts. `--folder` organizes into vault subfolders.
+
+interactive: `--pick-folder` choose which vault folder to save in. `--pick-lang` choose which transcript language to use.
 
 ---
 
@@ -65,7 +67,7 @@ supports pdfs, urls, markdown, arxiv papers, youtube videos, and x/twitter posts
 metis search "what role did titans play in greek mythos"
 ```
 
-semantic search. finds by meaning, not keywords.
+semantic search. finds by meaning, not keywords. pick a result to chat about it.
 
 ---
 
@@ -78,7 +80,9 @@ metis chat "question" --note game_theory/intro --save
 metis chat "question" --expand
 ```
 
-answers grounded in your vault with sources cited. `--note` scopes to a specific note. `--save` writes the Q&A into the note. `--expand` offers to search wikipedia when your vault doesn't have enough.
+answers grounded in your vault with sources cited. `--note` scopes to a specific note and offers to save the Q&A. `--save` saves without prompting. `--expand` searches wikipedia when your vault doesn't have enough.
+
+interactive: `--pick` choose which vault note to ask about.
 
 ---
 
@@ -91,6 +95,8 @@ metis link --verbose
 ```
 
 discovers connections between notes. `--write` adds `[[wikilinks]]` to the files. `--verbose` explains why notes are connected.
+
+interactive: `--pick` choose which vault note to find connections for.
 
 ---
 
