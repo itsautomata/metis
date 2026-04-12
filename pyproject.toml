@@ -19,6 +19,7 @@ dependencies = [
     "youtube-transcript-api>=1.0.0",
     "keyring>=25.0.0",
     "questionary>=2.0.0",
+    "scikit-learn>=1.5.0",
 ]
 
 [project.optional-dependencies]
