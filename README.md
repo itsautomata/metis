@@ -110,6 +110,34 @@ re-indexes the vault after you edit notes in obsidian.
 
 ---
 
+## classification & clustering
+
+metis learns from your vault to help you organize.
+
+**auto-categorization:** when you ingest without `--folder`, metis suggests a folder based on your vault's content. accept, override, or pick from menu. every choice improves future suggestions.
+
+**vault health:**
+
+```bash
+metis health
+metis health --misplaced
+metis health --split hermes
+metis health --unique
+```
+
+checkup on your vault structure. shows folder alignment, suggests which notes might belong in a different folder, and proposes subfolder splits for large folders.
+
+**folder descriptions:**
+
+```bash
+metis folders
+metis folders --edit
+```
+
+list folders with their ML descriptions. `--edit` opens in your editor to refine how the classifier understands each folder.
+
+---
+
 ## config
 
 ```yaml
