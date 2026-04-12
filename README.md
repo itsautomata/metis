@@ -14,8 +14,10 @@ cd metis
 
 # option a: install globally (use metis from anywhere)
 uv tool install -e .
+# to update global install
+uv tool install -e . --force
 
-# option b: install in virtual env
+# option b: install in virtual env (for development)
 uv venv
 source .venv/bin/activate
 uv pip install -e "."
@@ -121,7 +123,7 @@ metis learns from your vault to help you organize.
 ```bash
 metis health
 metis health --misplaced
-metis health --split hermes
+metis health --split hermes_folder
 metis health --unique
 ```
 
