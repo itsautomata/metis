@@ -102,6 +102,20 @@ def sync_vault(config: MetisConfig) -> SyncReport:
             _remove_file_from_index(old_path, config)
             report.deleted += 1
 
+    # also clean chromadb of orphaned entries (ingested before sync tracking)
+    collection = get_collection(config)
+    all_meta = collection.get(include=["metadatas"])
+    indexed_paths = set()
+    for meta in all_meta["metadatas"]:
+        fp = meta.get("file_path", "")
+        if fp:
+            indexed_paths.add(fp)
+
+    for indexed_path in indexed_paths:
+        if indexed_path not in current_paths:
+            _remove_file_from_index(indexed_path, config)
+            report.deleted += 1
+
     report.total_files = len(vault_files)
     _save_sync_state(new_state)
 
