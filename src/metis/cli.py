@@ -140,7 +140,32 @@ def ingest(
         console.print("[yellow]note was NOT saved. vault is unchanged.[/yellow]")
         return
 
-    # 4. write to vault — only after embedding succeeds
+    # 4. suggest folder if none specified
+    if not folder and not pick_folder_flag:
+        from metis.classify import suggest_folder, record_feedback
+        suggestions = suggest_folder(embeddings[0], config)
+        if suggestions:
+            top_folder, top_score = suggestions[0]
+            console.print(f"\n[bold]suggested folder:[/bold] [cyan]{top_folder}[/cyan] ({top_score:.2f})")
+            if len(suggestions) > 1:
+                others = ", ".join(f"{f} ({s:.2f})" for f, s in suggestions[1:])
+                console.print(f"  [dim]also: {others}[/dim]")
+
+            choice = input(f"\naccept? [Y/n/other]: ").strip()
+            if choice == "" or choice.lower() == "y":
+                config.output_folder = top_folder
+                record_feedback(source, top_folder, top_folder)
+            elif choice.lower() == "n":
+                from metis.pick import pick_folder
+                picked = pick_folder(config)
+                if picked:
+                    config.output_folder = picked
+                    record_feedback(source, top_folder, picked)
+            else:
+                config.output_folder = choice
+                record_feedback(source, top_folder, choice)
+
+    # 5. write to vault — only after embedding succeeds
     console.print("[dim]writing to vault...[/dim]")
     file_path = write_to_vault(title, text, source_link, source_type, processed, config, extra=extra)
     console.print(f"  saved: {file_path}")
@@ -459,3 +484,202 @@ def secret(
 
     else:
         console.print(f"[red]unknown action: {action}. use 'set' or 'delete'.[/red]")
+
+
+@app.command()
+def folders(
+    edit: bool = typer.Option(False, "--edit", "-e", help="open folder descriptions in editor"),
+):
+    """list vault folders with their descriptions, or edit them."""
+    import os
+    import subprocess
+    import tempfile
+    from metis.classify import (
+        _get_vault_folders, _auto_describe_folder, _load_categorization, _save_categorization,
+        get_folder_embeddings,
+    )
+
+    config = load_config()
+    vault_folders = _get_vault_folders(config)
+
+    if not vault_folders:
+        console.print("[yellow]no folders in vault.[/yellow]")
+        return
+
+    data = _load_categorization()
+    descriptions = data.get("folder_descriptions", {})
+
+    # ensure all folders have descriptions
+    for f in vault_folders:
+        if f not in descriptions:
+            descriptions[f] = _auto_describe_folder(f, config)
+    data["folder_descriptions"] = descriptions
+    _save_categorization(data)
+
+    if edit:
+        # write descriptions to temp file, open in editor
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, prefix="metis-folders-") as tmp:
+            tmp.write("# folder descriptions\n")
+            tmp.write("# edit descriptions below. one per line: folder: description\n")
+            tmp.write("# save and close to apply.\n\n")
+            for f in vault_folders:
+                tmp.write(f"{f}: {descriptions.get(f, '')}\n")
+            tmp_path = tmp.name
+
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nano"
+        subprocess.call([editor, tmp_path])
+
+        # read back changes
+        updated = {}
+        with open(tmp_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if ": " in line:
+                    folder, desc = line.split(": ", 1)
+                    folder = folder.strip()
+                    if folder in vault_folders:
+                        updated[folder] = desc.strip()
+
+        os.unlink(tmp_path)
+
+        if not updated:
+            console.print("[yellow]no changes detected.[/yellow]")
+            return
+
+        # apply changes and re-embed updated folders
+        changed = []
+        for f, desc in updated.items():
+            if descriptions.get(f) != desc:
+                descriptions[f] = desc
+                # clear cached embedding so it gets recomputed
+                if f in data.get("folder_embeddings", {}):
+                    del data["folder_embeddings"][f]
+                changed.append(f)
+
+        data["folder_descriptions"] = descriptions
+        _save_categorization(data)
+
+        if changed:
+            console.print(f"[dim]re-embedding {len(changed)} updated folders...[/dim]")
+            get_folder_embeddings(config)
+            console.print(f"[bold green]{len(changed)} folder descriptions updated.[/bold green]")
+            for f in changed:
+                console.print(f"  [cyan]{f}[/cyan]")
+        else:
+            console.print("[yellow]no changes detected.[/yellow]")
+
+    else:
+        # list mode
+        for f in vault_folders:
+            note_count = len(list((config.vault_path / f).glob("*.md")))
+            desc = descriptions.get(f, "")
+            console.print(f"[bold cyan]{f}[/bold cyan] ({note_count} notes)")
+            console.print(f"  [dim]{desc}[/dim]")
+            console.print()
+
+
+@app.command()
+def health(
+    misplaced: bool = typer.Option(False, "--misplaced", help="show notes that might belong in a different folder"),
+    split: Optional[str] = typer.Option(None, "--split", help="show split suggestion for a specific folder"),
+    unique: bool = typer.Option(False, "--unique", help="show notes that don't cluster with anything"),
+):
+    """vault health checkup: folder alignment, misplaced notes, split suggestions."""
+    from metis.health import run_health
+
+    config = load_config()
+    vault = config.vault_path
+
+    def _short(fp: str) -> str:
+        try:
+            return str(Path(fp).relative_to(vault)).removesuffix(".md")
+        except ValueError:
+            return Path(fp).stem
+
+    console.print("[bold]checking vault health...[/bold]\n")
+    report = run_health(config)
+
+    if report.n_notes < 2:
+        console.print("[yellow]not enough notes to analyze.[/yellow]")
+        return
+
+    # --- flag: --split <folder> ---
+    if split:
+        from metis.health import analyze_split
+        groups = analyze_split(split, config)
+        if groups is None:
+            console.print(f"[yellow]{split}/ has too few notes to split (need 4+).[/yellow]")
+            return
+        console.print(f"[bold]{split}/[/bold] could split into:\n")
+        for group in groups:
+            console.print(f"  [cyan]{split}/{group.folder_name}/[/cyan] ({group.size} notes)")
+            console.print(f"  topics: [dim]{group.label}[/dim]")
+            for fp, _ in group.members[:5]:
+                console.print(f"    {_short(fp)}")
+            if group.size > 5:
+                console.print(f"    [dim]...and {group.size - 5} more[/dim]")
+            console.print()
+        return
+
+    # --- flag: --misplaced ---
+    if misplaced:
+        if not report.misplaced:
+            console.print("[green]no misplaced notes found. everything looks right.[/green]")
+            return
+        console.print(f"[bold]{len(report.misplaced)} potentially misplaced notes:[/bold]\n")
+        from collections import defaultdict as _dd
+        by_dest: dict[str, list] = _dd(list)
+        for m in report.misplaced:
+            by_dest[m.suggested_folder].append(m)
+        for dest, items in sorted(by_dest.items()):
+            console.print(f"  move to [cyan]{dest}/[/cyan]:")
+            for m in items:
+                console.print(f"    {_short(m.file_path)} ({m.neighbor_count}/5)")
+            console.print()
+        return
+
+    # --- flag: --unique ---
+    if unique:
+        if not report.unique:
+            console.print("[green]no isolated notes found.[/green]")
+            return
+        console.print(f"[bold]{len(report.unique)} unique notes:[/bold]\n")
+        for fp, folder in report.unique:
+            console.print(f"  [dim]{_short(fp)}[/dim]")
+        return
+
+    # --- default: folder health overview ---
+    for fh in report.folders:
+        if fh.status == "—":
+            label = "[dim]—[/dim]"
+        elif fh.status == "tight":
+            label = "[green]tight[/green]"
+        elif fh.status == "mixed":
+            label = "[yellow]mixed[/yellow]"
+        else:
+            label = "[red]scattered[/red]"
+
+        if len(fh.topics) >= 2:
+            topic_names = " + ".join(f"[{t.label.split(',')[0].strip()}]" for t in fh.topics)
+            console.print(f"  {label}  [cyan]{fh.folder}/[/cyan] ({fh.total} notes)")
+            console.print(f"           spans: {topic_names}")
+        else:
+            console.print(f"  {label}  [cyan]{fh.folder}/[/cyan] ({fh.total} notes)")
+    console.print()
+
+    # hints for next steps
+    hints = []
+    if report.misplaced:
+        hints.append(f"{len(report.misplaced)} notes might be misplaced. run: [bold]metis health --misplaced[/bold]")
+    if report.split_folders:
+        for f in report.split_folders:
+            hints.append(f"{f}/ could split. run: [bold]metis health --split {f}[/bold]")
+    if report.unique:
+        hints.append(f"{len(report.unique)} unique notes. run: [bold]metis health --unique[/bold]")
+
+    if hints:
+        console.print()
+        for h in hints:
+            console.print(f"  {h}")
