@@ -253,6 +253,41 @@ def extract_from_xtweet(url: str, bearer_token: str = "") -> tuple[str, str, str
     return _extract_via_oembed(url)
 
 
+def is_pdf_url(url: str) -> bool:
+    """check if URL points directly to a PDF."""
+    from urllib.parse import urlparse
+    path = urlparse(url).path.lower()
+    return path.endswith(".pdf")
+
+
+def extract_from_pdf_url(url: str) -> tuple[str, str]:
+    """download PDF from URL, extract text, delete temp file. returns (title, text)."""
+    import tempfile
+
+    response = httpx.get(url, follow_redirects=True, timeout=60)
+    response.raise_for_status()
+
+    # verify we actually got a PDF, not an HTML redirect
+    content_type = response.headers.get("content-type", "")
+    if "pdf" not in content_type and not response.content[:5] == b"%PDF-":
+        raise ValueError(f"URL does not serve a PDF (got {content_type}): {url}")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(response.content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        _, text = extract_from_pdf(tmp_path)
+    finally:
+        tmp_path.unlink()
+
+    # derive title: first meaningful line of text, fallback to URL
+    first_lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
+    title = first_lines[0][:100] if first_lines else _title_from_url(url)
+
+    return title, text
+
+
 def is_arxiv(url: str) -> bool:
     """check if URL is an arxiv paper."""
     return bool(re.match(r"https?://(www\.)?arxiv\.org/(abs|pdf)/", url))
@@ -474,6 +509,10 @@ def extract(
         if is_arxiv(source):
             title, text = extract_from_arxiv(source)
             return title, text, "arxiv", _arxiv_abs_url(source), None
+
+        if is_pdf_url(source):
+            title, text = extract_from_pdf_url(source)
+            return title, text, "pdf", source, None
 
         title, text = extract_from_url(source)
         return title, text, "url", source, None

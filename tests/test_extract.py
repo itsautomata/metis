@@ -8,6 +8,7 @@ from metis.ingest.extract import (
     is_arxiv,
     is_youtube,
     is_xtweet,
+    is_pdf_url,
     _youtube_video_id,
     _arxiv_to_pdf_url,
     _arxiv_abs_url,
@@ -107,6 +108,25 @@ def test_is_xtweet_profile():
 
 def test_is_xtweet_not_x():
     assert is_xtweet("https://example.com/user/status/123") is False
+
+
+# --- PDF URL detection ---
+
+def test_is_pdf_url_direct():
+    assert is_pdf_url("https://example.com/paper.pdf") is True
+
+def test_is_pdf_url_with_path():
+    assert is_pdf_url("https://example.com/docs/2026/report.pdf") is True
+
+def test_is_pdf_url_false_html():
+    assert is_pdf_url("https://example.com/page.html") is False
+
+def test_is_pdf_url_false_no_extension():
+    assert is_pdf_url("https://example.com/article") is False
+
+def test_is_pdf_url_arxiv_not_caught():
+    """arxiv PDFs don't end in .pdf — they're caught by is_arxiv instead."""
+    assert is_pdf_url("https://arxiv.org/pdf/2401.12345") is False
 
 
 # --- markdown extraction ---
