@@ -408,11 +408,30 @@ def link(
 
 
 @app.command()
-def sync():
+def sync(
+    cloud: bool = typer.Option(False, "--cloud", help="also push to azure AI search"),
+    pull: bool = typer.Option(False, "--pull", help="download pending notes from cloud to vault"),
+):
     """re-index vault to catch manual edits."""
     from metis.index.sync import sync_vault
 
     config = load_config()
+
+    # pull pending notes from cloud first
+    if pull:
+        from metis.cloud.storage import list_pending, download_pending, delete_pending
+        pending = list_pending()
+        if pending:
+            console.print(f"[dim]pulling {len(pending)} notes from cloud...[/dim]")
+            for name in pending:
+                content = download_pending(name)
+                local_path = config.vault_path / name
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                local_path.write_text(content, encoding="utf-8")
+                delete_pending(name)
+                console.print(f"  {name}")
+            console.print()
+
     console.print(f"[bold]syncing:[/bold] {config.vault_path}\n")
 
     report = sync_vault(config)
@@ -423,6 +442,26 @@ def sync():
     console.print(f"  unchanged: {report.unchanged} files")
     console.print()
     console.print(f"[bold green]vault indexed.[/bold green] {report.total_files} files.")
+
+    if cloud:
+        from metis.cloud.sync import sync_to_cloud
+        from metis.secrets import get_secret
+
+        endpoint = get_secret("azure-search-endpoint")
+        key = get_secret("azure-search-key")
+
+        if not endpoint or not key:
+            console.print("[red]azure search credentials not set. run:[/red]")
+            console.print("  metis secret set azure-search-endpoint")
+            console.print("  metis secret set azure-search-key")
+            return
+
+        console.print(f"\n[dim]pushing to azure AI search...[/dim]")
+        result = sync_to_cloud(config, endpoint, key)
+        console.print(f"  uploaded: {result['uploaded']} chunks")
+        if result["errors"]:
+            console.print(f"  [red]errors: {result['errors']}[/red]")
+        console.print("[bold green]cloud synced.[/bold green]")
 
 
 @app.command()
@@ -454,6 +493,10 @@ def secret(
         "openai-key": OPENAI_KEY,
         "azure-key": AZURE_KEY,
         "x-token": X_BEARER,
+        "azure-search-endpoint": "azure-search-endpoint",
+        "azure-search-key": "azure-search-key",
+        "discord-token": "discord-token",
+        "azure-storage-connection": "azure-storage-connection",
     }
 
     # interactive picker if no name given
@@ -484,6 +527,13 @@ def secret(
 
     else:
         console.print(f"[red]unknown action: {action}. use 'set' or 'delete'.[/red]")
+
+
+@app.command()
+def bot():
+    """run the discord bot."""
+    from metis.cloud.bot import run_bot
+    run_bot()
 
 
 @app.command()
