@@ -1,4 +1,4 @@
-"""metis CLI — second brain that pairs with Obsidian."""
+"""metis CLI: second brain that pairs with obsidian."""
 
 from pathlib import Path
 from typing import Optional
@@ -62,13 +62,13 @@ def _complete_vault_notes(incomplete: str) -> list[str]:
 
 @app.command()
 def ingest(
-    source: str = typer.Argument(help="file path or URL to ingest"),
+    sources: list[str] = typer.Argument(help="file paths or URLs to ingest"),
     folder: Optional[str] = typer.Option(None, "--folder", "-f", help="vault subfolder to save in", autocompletion=_complete_vault_folders),
     pick_folder_flag: bool = typer.Option(False, "--pick-folder", help="interactively pick vault folder"),
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="transcript language code (youtube)"),
     pick_lang: bool = typer.Option(False, "--pick-lang", help="interactively pick transcript language (youtube)"),
 ):
-    """save, summarize, tag, embed, and find links for a file or URL."""
+    """save, summarize, tag, embed, and find links for files or URLs."""
     from metis.ingest.extract import extract, NoTranscriptError
     from metis.ingest.process import process
     from metis.ingest.write import write_to_vault, write_link_only, check_duplicate
@@ -88,96 +88,96 @@ def ingest(
             return
         config.output_folder = folder
 
-    # check for duplicate
-    existing = check_duplicate(source)
-    if existing:
-        console.print(f"[yellow]already ingested:[/yellow] {existing.name}")
-        if not typer.confirm("update?"):
-            return
-        # remove old vectors and note
-        from metis.index.sync import _remove_file_from_index
-        _remove_file_from_index(str(existing), config)
-        existing.unlink()
+    for i, source in enumerate(sources):
+        if len(sources) > 1:
+            console.print(f"\n[bold]({i+1}/{len(sources)})[/bold]")
 
-    console.print(f"[bold]ingesting:[/bold] {source}")
+        # check for duplicate
+        existing = check_duplicate(source)
+        if existing:
+            console.print(f"[yellow]already ingested:[/yellow] {existing.name}")
+            if not typer.confirm("update?"):
+                continue
+            from metis.index.sync import _remove_file_from_index
+            _remove_file_from_index(str(existing), config)
+            existing.unlink()
 
-    # 1. extract
-    console.print("[dim]extracting text...[/dim]")
-    try:
-        from metis.secrets import get_x_bearer
-        title, text, source_type, source_link, extra = extract(
-            source, lang=lang, pick_lang=pick_lang,
-            x_bearer_token=get_x_bearer(config.x_api.bearer_token),
-        )
-    except NoTranscriptError:
-        console.print("[yellow]no transcript found.[/yellow]")
-        save = typer.confirm("save link anyway?")
-        if save:
-            file_path = write_link_only(source, config)
-            console.print(f"[bold green]link saved.[/bold green]")
-            console.print(f"  note: {file_path}")
-        return
-    except (FileNotFoundError, ValueError) as e:
-        console.print(f"[red]{e}[/red]")
-        return
+        console.print(f"[bold]ingesting:[/bold] {source}")
 
-    console.print(f"  title: {title}")
-    console.print(f"  type:  {source_type}")
-    console.print(f"  chars: {len(text)}")
+        # 1. extract
+        console.print("[dim]extracting text...[/dim]")
+        try:
+            from metis.secrets import get_x_bearer
+            title, text, source_type, source_link, extra = extract(
+                source, lang=lang, pick_lang=pick_lang,
+                x_bearer_token=get_x_bearer(config.x_api.bearer_token),
+            )
+        except NoTranscriptError:
+            console.print("[yellow]no transcript found.[/yellow]")
+            save = typer.confirm("save link anyway?")
+            if save:
+                file_path = write_link_only(source, config)
+                console.print(f"[bold green]link saved.[/bold green]")
+                console.print(f"  note: {file_path}")
+            continue
+        except (FileNotFoundError, ValueError) as e:
+            console.print(f"[red]{e}[/red]")
+            continue
 
-    # 2. summarize + tag + chunk
-    console.print(f"[dim]processing with {config.provider}...[/dim]")
-    processed = process(text, config)
-    console.print(f"  tags:   {', '.join(processed.tags)}")
-    console.print(f"  chunks: {len(processed.chunks)}")
+        console.print(f"  title: {title}")
+        console.print(f"  type:  {source_type}")
+        console.print(f"  chars: {len(text)}")
 
-    # 3. embed first — if this fails, vault stays clean
-    console.print("[dim]embedding and indexing...[/dim]")
-    try:
-        embeddings = embed_texts(processed.chunks, config)
-    except Exception as e:
-        console.print(f"[red]embedding failed: {e}[/red]")
-        console.print("[yellow]note was NOT saved. vault is unchanged.[/yellow]")
-        return
+        # 2. summarize + tag + chunk
+        console.print(f"[dim]processing with {config.provider}...[/dim]")
+        processed = process(text, config)
+        console.print(f"  tags:   {', '.join(processed.tags)}")
+        console.print(f"  chunks: {len(processed.chunks)}")
 
-    # 4. suggest folder if none specified
-    if not folder and not pick_folder_flag:
-        from metis.classify import suggest_folder, record_feedback
-        suggestions = suggest_folder(embeddings[0], config)
-        if suggestions:
-            top_folder, top_score = suggestions[0]
-            console.print(f"\n[bold]suggested folder:[/bold] [cyan]{top_folder}[/cyan] ({top_score:.2f})")
-            if len(suggestions) > 1:
-                others = ", ".join(f"{f} ({s:.2f})" for f, s in suggestions[1:])
-                console.print(f"  [dim]also: {others}[/dim]")
+        # 3. embed first — if this fails, vault stays clean
+        console.print("[dim]embedding and indexing...[/dim]")
+        try:
+            embeddings = embed_texts(processed.chunks, config)
+        except Exception as e:
+            console.print(f"[red]embedding failed: {e}[/red]")
+            console.print("[yellow]note was NOT saved. vault is unchanged.[/yellow]")
+            continue
 
-            choice = input(f"\naccept? [Y/n/other]: ").strip()
-            if choice == "" or choice.lower() == "y":
-                config.output_folder = top_folder
-                record_feedback(source, top_folder, top_folder)
-            elif choice.lower() == "n":
-                from metis.pick import pick_folder
-                picked = pick_folder(config)
-                if picked:
-                    config.output_folder = picked
-                    record_feedback(source, top_folder, picked)
-            else:
-                config.output_folder = choice
-                record_feedback(source, top_folder, choice)
+        # 4. suggest folder if none specified (only for first source in batch, or each)
+        if not folder and not pick_folder_flag:
+            from metis.classify import suggest_folder, record_feedback
+            suggestions = suggest_folder(embeddings[0], config)
+            if suggestions:
+                top_folder, top_score = suggestions[0]
+                console.print(f"\n[bold]suggested folder:[/bold] [cyan]{top_folder}[/cyan] ({top_score:.2f})")
+                if len(suggestions) > 1:
+                    others = ", ".join(f"{f} ({s:.2f})" for f, s in suggestions[1:])
+                    console.print(f"  [dim]also: {others}[/dim]")
 
-    # 5. write to vault — only after embedding succeeds
-    console.print("[dim]writing to vault...[/dim]")
-    file_path = write_to_vault(title, text, source_link, source_type, processed, config, extra=extra)
-    console.print(f"  saved: {file_path}")
+                choice = input(f"\naccept? [Y/n/other]: ").strip()
+                if choice == "" or choice.lower() == "y":
+                    config.output_folder = top_folder
+                    record_feedback(source, top_folder, top_folder)
+                elif choice.lower() == "n":
+                    from metis.pick import pick_folder
+                    picked = pick_folder(config)
+                    if picked:
+                        config.output_folder = picked
+                        record_feedback(source, top_folder, picked)
+                else:
+                    config.output_folder = choice
+                    record_feedback(source, top_folder, choice)
 
-    # 5. store vectors with pre-computed embeddings
-    n = store_chunks_with_embeddings(processed.chunks, embeddings, file_path, config)
-    console.print(f"  indexed: {n} chunks")
+        # 5. write to vault — only after embedding succeeds
+        console.print("[dim]writing to vault...[/dim]")
+        file_path = write_to_vault(title, text, source_link, source_type, processed, config, extra=extra)
+        console.print(f"  saved: {file_path}")
 
-    # done
-    console.print(f"\n[bold green]done.[/bold green]")
-    console.print(f"  note:   {file_path}")
-    console.print(f"  source: {source_link}")
+        # 6. store vectors with pre-computed embeddings
+        n = store_chunks_with_embeddings(processed.chunks, embeddings, file_path, config)
+        console.print(f"  indexed: {n} chunks")
+
+        console.print(f"[bold green]done.[/bold green] {file_path.name}")
 
 
 @app.command()
@@ -442,9 +442,61 @@ def init():
     console.print("[dim]run 'metis secret set <name>' to store api keys securely.[/dim]")
 
 
+def _complete_config_keys(incomplete: str) -> list[str]:
+    return [k for k in ["vault", "folder", "provider"] if k.startswith(incomplete)]
+
+
+@app.command(name="config")
+def config_cmd(
+    key: Optional[str] = typer.Argument(None, help="setting: vault, folder, provider", autocompletion=_complete_config_keys),
+    value: Optional[str] = typer.Argument(None, help="new value"),
+):
+    """view or change metis settings."""
+    import yaml
+    from metis.config import CONFIG_PATH, init_config
+
+    init_config()
+
+    with open(CONFIG_PATH) as f:
+        raw = yaml.safe_load(f) or {}
+
+    config_keys = {
+        "vault": "vault_path",
+        "folder": "output_folder",
+        "provider": "provider",
+    }
+
+    # no args: show current settings
+    if not key:
+        config = load_config()
+        console.print(f"  vault:    {config.vault_path}")
+        console.print(f"  folder:   {config.output_folder}")
+        console.print(f"  provider: {config.provider}")
+        console.print(f"\n[dim]{CONFIG_PATH}[/dim]")
+        return
+
+    if key not in config_keys:
+        console.print(f"[red]unknown setting: {key}. options: {', '.join(config_keys.keys())}[/red]")
+        return
+
+    # no value: show current
+    if not value:
+        yaml_key = config_keys[key]
+        console.print(f"  {key}: {raw.get(yaml_key, 'not set')}")
+        return
+
+    # set value
+    yaml_key = config_keys[key]
+    raw[yaml_key] = value
+    with open(CONFIG_PATH, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+
+    console.print(f"[bold green]{key} set to: {value}[/bold green]")
+
+
 @app.command()
 def secret(
-    action: str = typer.Argument(help="'set' or 'delete'"),
+    action: str = typer.Argument(help="'set', 'delete', or 'list'"),
     name: Optional[str] = typer.Argument(None, help="key name: openai-key, azure-key, x-token"),
 ):
     """manage api keys in the OS keychain."""
@@ -454,7 +506,19 @@ def secret(
         "openai-key": OPENAI_KEY,
         "azure-key": AZURE_KEY,
         "x-token": X_BEARER,
+        "azure-search-endpoint": "azure-search-endpoint",
+        "azure-search-key": "azure-search-key",
+        "discord-token": "discord-token",
+        "azure-storage-connection": "azure-storage-connection",
     }
+
+    if action == "list":
+        from metis.secrets import get_secret
+        for display_name, keychain_name in key_map.items():
+            value = get_secret(keychain_name)
+            status = "[green]set[/green]" if value else "[dim]not set[/dim]"
+            console.print(f"  {display_name}: {status}")
+        return
 
     # interactive picker if no name given
     if not name:
@@ -483,7 +547,7 @@ def secret(
         console.print(f"[bold green]{name} removed from keychain.[/bold green]")
 
     else:
-        console.print(f"[red]unknown action: {action}. use 'set' or 'delete'.[/red]")
+        console.print(f"[red]unknown action: {action}. use 'set', 'delete', or 'list'.[/red]")
 
 
 @app.command()
