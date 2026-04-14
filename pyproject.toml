@@ -26,6 +26,11 @@ dependencies = [
 test = [
     "pytest>=8.0.0",
 ]
+cloud = [
+    "azure-search-documents>=11.4.0",
+    "azure-storage-blob>=12.19.0",
+    "discord.py>=2.3.0",
+]
 
 [project.scripts]
 metis = "metis.cli:app"
