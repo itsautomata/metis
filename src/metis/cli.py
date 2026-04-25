@@ -197,9 +197,19 @@ def search(
         console.print("[yellow]no results. ingest some content first.[/yellow]")
         return
 
-    for i, r in enumerate(results, 1):
+    # deduplicate by note (keep best chunk per file)
+    seen = {}
+    for r in results:
+        if r.file_path not in seen:
+            seen[r.file_path] = r
+    deduped = list(seen.values())
+
+    for i, r in enumerate(deduped, 1):
         path = Path(r.file_path).name
         preview = r.text[:150].replace("\n", " ").strip()
+        if preview.startswith("---"):
+            parts = preview.split("---", 2)
+            preview = parts[2].strip()[:150] if len(parts) > 2 else preview
         console.print(f"[bold]{i}.[/bold] [{r.score}] [cyan]{path}[/cyan]")
         console.print(f"   {preview}...")
         console.print()
