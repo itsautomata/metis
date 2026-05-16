@@ -9,7 +9,7 @@ ingest anything. search by meaning. chat with your knowledge. discover connectio
 ## setup
 
 ```bash
-git clone https://github.com/yourusername/metis.git
+git clone https://github.com/itsautomata/metis
 cd metis
 
 # option a: install globally (use metis from anywhere)
@@ -33,10 +33,11 @@ store your api keys securely:
 metis secret set openai-key
 metis secret set azure-key     # if using azure
 metis secret set x-token       # optional, for full x/twitter extraction
-metis secret set               # interactive — pick which key
+metis secret set               # interactive, you pick which key you want to set
+metis secret list              # show which keys are set (no values)
 ```
 
-edit `~/.metis/config.yaml` for vault path and provider settings.
+quick changes via `metis config vault <path>` or `metis config provider azure`. for everything else, edit `~/.metis/config.yaml`.
 
 ---
 
@@ -46,7 +47,7 @@ run `metis --help` or `metis <command> --help` for all options.
 
 ### ingest
 
-save anything to your vault — summarized, tagged, embedded, and linked back to the source.
+save anything to your vault: summarized, tagged, embedded, and linked back to the source.
 
 ```bash
 metis ingest https://en.wikipedia.org/wiki/Metis_(mythology)
@@ -55,9 +56,10 @@ metis ingest lecture-notes.md
 metis ingest paper.pdf --folder research/ai
 metis ingest https://www.youtube.com/watch?v=abc123 --lang fr
 metis ingest https://arxiv.org/abs/2401.12345
+metis ingest paper1.pdf paper2.pdf https://arxiv.org/abs/2402.00001
 ```
 
-supports pdfs, urls, markdown, arxiv papers, youtube videos, and x/twitter posts. `--folder` organizes into vault subfolders.
+accepts one source or many at once. supports pdfs, urls, markdown, arxiv papers, youtube videos, and x/twitter posts. `--folder` organizes into vault subfolders.
 
 > interactive: `--pick-folder` (vault folders) / `--pick-lang` (transcript languages)
 
@@ -141,6 +143,15 @@ list folders with their ML descriptions. `--edit` opens in your editor to refine
 ---
 
 ## config
+
+```bash
+metis config                       # show current settings
+metis config vault ~/obsidian/my-vault
+metis config provider azure
+metis config folder metis-ingested
+```
+
+for anything not covered above, edit `~/.metis/config.yaml`:
 
 ```yaml
 # ~/.metis/config.yaml
