@@ -94,13 +94,14 @@ def ingest(
 
         # check for duplicate
         existing = check_duplicate(source)
+        replace_path: Optional[Path] = None
         if existing:
             console.print(f"[yellow]already ingested:[/yellow] {existing.name}")
             if not typer.confirm("update?"):
                 continue
             from metis.index.sync import _remove_file_from_index
             _remove_file_from_index(str(existing), config)
-            existing.unlink()
+            replace_path = existing
 
         console.print(f"[bold]ingesting:[/bold] {source}")
 
@@ -168,7 +169,9 @@ def ingest(
                     config.output_folder = choice
                     record_feedback(source, top_folder, choice)
 
-        # 5. write to vault — only after embedding succeeds
+        # 5. write to vault — only after embedding succeeds.
+        if replace_path and replace_path.exists():
+            replace_path.unlink()
         console.print("[dim]writing to vault...[/dim]")
         file_path = write_to_vault(title, text, source_link, source_type, processed, config, extra=extra)
         console.print(f"  saved: {file_path}")
