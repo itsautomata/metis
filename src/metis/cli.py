@@ -526,9 +526,22 @@ def secret(
     }
 
     if action == "list":
-        from metis.secrets import get_secret
+        from metis.secrets import (
+            get_azure_key,
+            get_openai_key,
+            get_secret,
+            get_x_bearer,
+        )
+        config = load_config()
+        resolved = {
+            "openai-key": get_openai_key(config.openai.api_key),
+            "azure-key": get_azure_key(config.azure.api_key),
+            "x-token": get_x_bearer(config.x_api.bearer_token),
+        }
         for display_name, keychain_name in key_map.items():
-            value = get_secret(keychain_name)
+            value = resolved.get(display_name)
+            if value is None:
+                value = get_secret(keychain_name)
             status = "[green]set[/green]" if value else "[dim]not set[/dim]"
             console.print(f"  {display_name}: {status}")
         return
