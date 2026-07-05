@@ -9,19 +9,15 @@ from metis.config import MetisConfig
 
 STYLE = Style([
     ("qmark", "fg:cyan bold"),
-    ("question", "fg:white bold"),
+    ("question", "bold"),
     ("answer", "fg:cyan"),
     ("pointer", "fg:cyan bold"),
     ("highlighted", "fg:cyan bold"),
-    ("selected", "fg:cyan"),
-    ("text", "fg:white"),
-    ("instruction", "fg:white dim"),
-    ("completion-menu", "bg:black fg:white"),
-    ("completion-menu.completion", "bg:black fg:white"),
-    ("completion-menu.completion.current", "bg:#333333 fg:cyan bold"),
-    ("completion-menu.meta.completion", "bg:black fg:white dim"),
-    ("completion-menu.meta.completion.current", "bg:#333333 fg:cyan"),
-    ("scrollbar.background", "bg:#333333"),
+    ("selected", "reverse"),
+    ("instruction", "dim"),
+    ("completion-menu.completion.current", "reverse"),
+    ("completion-menu.meta.completion", "dim"),
+    ("completion-menu.meta.completion.current", "reverse dim"),
     ("scrollbar.button", "bg:cyan"),
 ])
 
@@ -51,29 +47,33 @@ def pick_note(config: MetisConfig) -> str | None:
     return choice
 
 
-def pick_folder(config: MetisConfig) -> str | None:
-    """interactive folder picker. returns relative path or None if cancelled."""
+def _vault_folders(config: MetisConfig) -> list[str]:
+    """vault subfolders as sorted relative paths, excluding symlinks that escape the vault."""
     vault = config.vault_path
     if not vault.exists():
-        return None
-
-    folders = sorted(
+        return []
+    vault_resolved = vault.resolve()
+    return sorted(
         str(p.relative_to(vault))
         for p in vault.rglob("*")
-        if p.is_dir() and not p.name.startswith(".")
+        if p.is_dir()
+        and not p.name.startswith(".")
+        and p.resolve().is_relative_to(vault_resolved)
     )
 
+
+def pick_folder(config: MetisConfig) -> str | None:
+    """folder picker with type-to-filter. returns relative path or None if cancelled."""
+    folders = _vault_folders(config)
     if not folders:
         return None
 
-    choice = questionary.autocomplete(
+    return questionary.autocomplete(
         "folder:",
         choices=folders,
         match_middle=True,
         style=STYLE,
     ).ask()
-
-    return choice
 
 
 _PICK_EXISTING = object()
@@ -99,7 +99,14 @@ def pick_suggested_folder(suggestions: list[tuple[str, float]], config: MetisCon
     ).ask()
 
     if choice is _PICK_EXISTING:
-        return pick_folder(config)
+        folders = _vault_folders(config)
+        if not folders:
+            return None
+        return questionary.select(
+            "existing folder:",
+            choices=folders,
+            style=STYLE,
+        ).ask()
 
     if choice is _NEW_FOLDER:
         name = questionary.text("new folder name:", style=STYLE).ask()
