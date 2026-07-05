@@ -59,9 +59,6 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
     return summary, key_points, tags
 
 
-SUSPICIOUS_PATTERNS = ["ignore", "system prompt", "you are", "disregard", "override", "pretend"]
-
-
 def _sanitize_tags(tags: list) -> list[str]:
     """validate and clean LLM-generated tags."""
     clean = []
@@ -73,8 +70,6 @@ def _sanitize_tags(tags: list) -> list[str]:
             continue
         if " " in tag and "-" not in tag:
             continue
-        if any(p in tag for p in SUSPICIOUS_PATTERNS):
-            continue
         clean.append(tag)
     return clean
 
@@ -85,8 +80,6 @@ def _sanitize_summary(summary: str, original_text: str) -> str:
         return ""
     if len(summary) > len(original_text):
         return summary[:len(original_text)]
-    if any(p in summary.lower() for p in SUSPICIOUS_PATTERNS):
-        return ""
     return summary
 
 
@@ -97,8 +90,6 @@ def _sanitize_key_points(points: list) -> list[str]:
         if not isinstance(point, str):
             continue
         if len(point) > 300:
-            continue
-        if any(p in point.lower() for p in SUSPICIOUS_PATTERNS):
             continue
         clean.append(point)
     return clean

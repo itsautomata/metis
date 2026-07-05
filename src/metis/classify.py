@@ -13,9 +13,8 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.neighbors import KNeighborsClassifier
 
-from metis.config import MetisConfig, CONFIG_DIR
+from metis.config import CONFIG_DIR, MetisConfig
 from metis.index.embed import embed_texts
 from metis.index.store import get_collection
 
@@ -152,37 +151,49 @@ def semantic_scores(note_embedding: list[float], folder_embeddings: dict[str, li
 
 # --- signal 2: KNN voting ---
 
-def knn_scores(note_embedding: list[float], config: MetisConfig, k: int = 5) -> dict[str, float]:
-    """find k nearest notes in chromadb, count their folders.
+KNN_OVERFETCH = 10
 
-    returns {folder: vote_fraction} sorted by votes descending.
+
+def _tally_folder_votes(ordered_file_paths: list[str], vault: Path, k: int) -> dict[str, int]:
+    """collapse nearest-first chunk hits to distinct notes, one vote per note."""
+    seen: set[str] = set()
+    votes: dict[str, int] = {}
+    for file_path in ordered_file_paths:
+        if not file_path or file_path in seen:
+            continue
+        try:
+            rel = Path(file_path).relative_to(vault)
+        except ValueError:
+            continue
+        seen.add(file_path)
+        folder = str(rel.parent)
+        if folder == ".":
+            folder = "metis-ingested"
+        votes[folder] = votes.get(folder, 0) + 1
+        if len(seen) >= k:
+            break
+    return votes
+
+
+def knn_scores(note_embedding: list[float], config: MetisConfig, k: int = 5) -> dict[str, float]:
+    """find the k nearest notes in chromadb, count their folders.
+
+    chunks are collapsed to their parent note, so a note's size does not inflate
+    its vote. returns {folder: vote_fraction} sorted by votes descending.
     """
     collection = get_collection(config)
-    if collection.count() == 0:
+    count = collection.count()
+    if count == 0:
         return {}
 
     results = collection.query(
         query_embeddings=[note_embedding],
-        n_results=min(k, collection.count()),
+        n_results=min(count, k * KNN_OVERFETCH),
     )
 
-    if not results["metadatas"] or not results["metadatas"][0]:
-        return {}
-
-    # count folder votes
-    vault = config.vault_path
-    folder_votes: dict[str, int] = {}
-
-    for meta in results["metadatas"][0]:
-        file_path = meta.get("file_path", "")
-        try:
-            rel = Path(file_path).relative_to(vault)
-            folder = str(rel.parent)
-            if folder == ".":
-                folder = "metis-ingested"
-            folder_votes[folder] = folder_votes.get(folder, 0) + 1
-        except ValueError:
-            continue
+    metadatas = results["metadatas"][0] if results["metadatas"] else []
+    ordered = [meta.get("file_path", "") for meta in metadatas]
+    folder_votes = _tally_folder_votes(ordered, config.vault_path, k)
 
     total = sum(folder_votes.values())
     if total == 0:
