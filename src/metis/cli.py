@@ -88,6 +88,8 @@ def ingest(
             return
         config.output_folder = folder
 
+    default_folder = config.output_folder
+
     for i, source in enumerate(sources):
         if len(sources) > 1:
             console.print(f"\n[bold]({i+1}/{len(sources)})[/bold]")
@@ -146,28 +148,20 @@ def ingest(
 
         # 4. suggest folder if none specified (only for first source in batch, or each)
         if not folder and not pick_folder_flag:
+            config.output_folder = default_folder
             from metis.classify import suggest_folder, record_feedback
             suggestions = suggest_folder(embeddings[0], config)
             if suggestions:
-                top_folder, top_score = suggestions[0]
-                console.print(f"\n[bold]suggested folder:[/bold] [cyan]{top_folder}[/cyan] ({top_score:.2f})")
-                if len(suggestions) > 1:
-                    others = ", ".join(f"{f} ({s:.2f})" for f, s in suggestions[1:])
-                    console.print(f"  [dim]also: {others}[/dim]")
-
-                choice = input(f"\naccept? [Y/n/other]: ").strip()
-                if choice == "" or choice.lower() == "y":
-                    config.output_folder = top_folder
-                    record_feedback(source, top_folder, top_folder)
-                elif choice.lower() == "n":
-                    from metis.pick import pick_folder
-                    picked = pick_folder(config)
-                    if picked:
-                        config.output_folder = picked
-                        record_feedback(source, top_folder, picked)
-                else:
-                    config.output_folder = choice
-                    record_feedback(source, top_folder, choice)
+                top_folder = suggestions[0][0]
+                from metis.pick import pick_suggested_folder
+                chosen = pick_suggested_folder(suggestions, config)
+                if chosen:
+                    resolved = (config.vault_path / chosen).resolve()
+                    if resolved.is_relative_to(config.vault_path.resolve()):
+                        config.output_folder = chosen
+                        record_feedback(source, top_folder, chosen)
+                    else:
+                        console.print(f"[red]folder must be inside the vault: {chosen}. using default.[/red]")
 
         # 5. write to vault — only after embedding succeeds.
         if replace_path and replace_path.exists():

@@ -76,6 +76,38 @@ def pick_folder(config: MetisConfig) -> str | None:
     return choice
 
 
+_PICK_EXISTING = object()
+_NEW_FOLDER = object()
+
+
+def pick_suggested_folder(suggestions: list[tuple[str, float]], config: MetisConfig) -> str | None:
+    """menu of ranked folder suggestions plus routes to an existing or new folder.
+
+    returns the chosen folder (relative path), or None if cancelled.
+    """
+    choices = [
+        questionary.Choice(title=f"{folder}  ({score:.2f})", value=folder)
+        for folder, score in suggestions
+    ]
+    choices.append(questionary.Choice(title="pick an existing folder…", value=_PICK_EXISTING))
+    choices.append(questionary.Choice(title="type a new folder name…", value=_NEW_FOLDER))
+
+    choice = questionary.select(
+        "save to which folder?",
+        choices=choices,
+        style=STYLE,
+    ).ask()
+
+    if choice is _PICK_EXISTING:
+        return pick_folder(config)
+
+    if choice is _NEW_FOLDER:
+        name = questionary.text("new folder name:", style=STYLE).ask()
+        return name.strip() if name and name.strip() else None
+
+    return choice
+
+
 def pick_search_result(results: list, config: MetisConfig) -> str | None:
     """interactive search result picker. returns file_path or None if cancelled."""
     if not results:
