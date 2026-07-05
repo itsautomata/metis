@@ -4,9 +4,14 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+import typer.rich_utils
 from rich.console import Console
 
 from metis.config import load_config, init_config
+
+# align typer's auto-generated help accent with metis's magenta
+typer.rich_utils.STYLE_OPTION = "bold magenta"
+typer.rich_utils.STYLE_COMMANDS_TABLE_FIRST_COLUMN = "bold magenta"
 
 app = typer.Typer(
     name="metis",
@@ -207,7 +212,7 @@ def search(
         if preview.startswith("---"):
             parts = preview.split("---", 2)
             preview = parts[2].strip()[:150] if len(parts) > 2 else preview
-        console.print(f"[bold]{i}.[/bold] [{r.score}] [cyan]{path}[/cyan]")
+        console.print(f"[bold]{i}.[/bold] [{r.score}] [magenta]{path}[/magenta]")
         console.print(f"   {preview}...")
         console.print()
 
@@ -400,7 +405,7 @@ def link(
         # remove .md for cleaner display
         source_rel = str(source_rel).removesuffix(".md")
         target_rel = str(target_rel).removesuffix(".md")
-        console.print(f"  [cyan]{source_rel}[/cyan] → [cyan]{target_rel}[/cyan] [{c.score}]")
+        console.print(f"  [magenta]{source_rel}[/magenta] → [magenta]{target_rel}[/magenta] [{c.score}]")
         if verbose:
             reason = explain_connection(c, config)
             console.print(f"    [dim]{reason}[/dim]")
@@ -650,7 +655,7 @@ def folders(
             get_folder_embeddings(config)
             console.print(f"[bold green]{len(changed)} folder descriptions updated.[/bold green]")
             for f in changed:
-                console.print(f"  [cyan]{f}[/cyan]")
+                console.print(f"  [magenta]{f}[/magenta]")
         else:
             console.print("[yellow]no changes detected.[/yellow]")
 
@@ -659,7 +664,7 @@ def folders(
         for f in vault_folders:
             note_count = len(list((config.vault_path / f).glob("*.md")))
             desc = descriptions.get(f, "")
-            console.print(f"[bold cyan]{f}[/bold cyan] ({note_count} notes)")
+            console.print(f"[bold magenta]{f}[/bold magenta] ({note_count} notes)")
             console.print(f"  [dim]{desc}[/dim]")
             console.print()
 
@@ -698,7 +703,7 @@ def health(
             return
         console.print(f"[bold]{split}/[/bold] could split into:\n")
         for group in groups:
-            console.print(f"  [cyan]{split}/{group.folder_name}/[/cyan] ({group.size} notes)")
+            console.print(f"  [magenta]{split}/{group.folder_name}/[/magenta] ({group.size} notes)")
             console.print(f"  topics: [dim]{group.label}[/dim]")
             for fp, _ in group.members[:5]:
                 console.print(f"    {_short(fp)}")
@@ -718,7 +723,7 @@ def health(
         for m in report.misplaced:
             by_dest[m.suggested_folder].append(m)
         for dest, items in sorted(by_dest.items()):
-            console.print(f"  move to [cyan]{dest}/[/cyan]:")
+            console.print(f"  move to [magenta]{dest}/[/magenta]:")
             for m in items:
                 console.print(f"    {_short(m.file_path)} ({m.neighbor_count}/5)")
             console.print()
@@ -747,10 +752,10 @@ def health(
 
         if len(fh.topics) >= 2:
             topic_names = " + ".join(f"[{t.label.split(',')[0].strip()}]" for t in fh.topics)
-            console.print(f"  {label}  [cyan]{fh.folder}/[/cyan] ({fh.total} notes)")
+            console.print(f"  {label}  [magenta]{fh.folder}/[/magenta] ({fh.total} notes)")
             console.print(f"           spans: {topic_names}")
         else:
-            console.print(f"  {label}  [cyan]{fh.folder}/[/cyan] ({fh.total} notes)")
+            console.print(f"  {label}  [magenta]{fh.folder}/[/magenta] ({fh.total} notes)")
     console.print()
 
     # hints for next steps

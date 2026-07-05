@@ -8,17 +8,17 @@ from questionary import Style
 from metis.config import MetisConfig
 
 STYLE = Style([
-    ("qmark", "fg:cyan bold"),
+    ("qmark", "fg:magenta bold"),
     ("question", "bold"),
-    ("answer", "fg:cyan"),
-    ("pointer", "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
+    ("answer", "fg:magenta"),
+    ("pointer", "fg:magenta bold"),
+    ("highlighted", "fg:magenta bold"),
     ("selected", "reverse"),
     ("instruction", "dim"),
     ("completion-menu.completion.current", "reverse"),
     ("completion-menu.meta.completion", "dim"),
     ("completion-menu.meta.completion.current", "reverse dim"),
-    ("scrollbar.button", "bg:cyan"),
+    ("scrollbar.button", "bg:magenta"),
 ])
 
 
