@@ -15,7 +15,7 @@ def get_client(config: MetisConfig) -> OpenAI:
     if config.provider == "azure":
         api_key = get_azure_key(config.azure.api_key)
         if not api_key:
-            raise ValueError("azure API key not set. run 'metis config set azure-key' or set METIS_AZURE_KEY")
+            raise ValueError("azure API key not set. run 'metis secret set azure-key' or set METIS_AZURE_KEY")
         if not config.azure.endpoint:
             raise ValueError("azure endpoint not set. edit ~/.metis/config.yaml")
         return AzureOpenAI(
@@ -27,7 +27,7 @@ def get_client(config: MetisConfig) -> OpenAI:
     # default: regular openai
     api_key = get_openai_key(config.openai.api_key)
     if not api_key:
-        raise ValueError("openai API key not set. run 'metis config set openai-key' or set METIS_OPENAI_KEY")
+        raise ValueError("openai API key not set. run 'metis secret set openai-key' or set METIS_OPENAI_KEY")
     return OpenAI(api_key=api_key)
 
 
