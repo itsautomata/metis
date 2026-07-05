@@ -1,11 +1,19 @@
 """tests for vault writing."""
 
-from pathlib import Path
-from datetime import date
+import re
+
+import yaml
 
 from metis.config import MetisConfig
 from metis.ingest.process import ProcessedContent
-from metis.ingest.write import slugify, build_markdown, write_to_vault, write_link_only
+from metis.ingest.write import build_markdown, slugify, write_link_only, write_to_vault
+
+
+def _frontmatter(md: str) -> dict:
+    """parse the YAML frontmatter block out of a built note."""
+    m = re.match(r"^---\n(.*?)\n---\n", md, re.DOTALL)
+    assert m, "no frontmatter block found"
+    return yaml.safe_load(m.group(1))
 
 
 # --- slugify ---
@@ -44,10 +52,11 @@ def test_build_markdown_has_frontmatter():
         chunks=[],
     )
     md = build_markdown("Title", "body text", "https://example.com", "url", processed)
-    assert "---" in md
-    assert "source: \"https://example.com\"" in md
-    assert "tags: [tag1, tag2]" in md
-    assert "type: url" in md
+    fm = _frontmatter(md)
+    assert fm["source"] == "https://example.com"
+    assert fm["tags"] == ["tag1", "tag2"]
+    assert fm["type"] == "url"
+    assert fm["summary"] == "test summary"
 
 
 def test_build_markdown_has_source_link():
@@ -73,7 +82,24 @@ def test_build_markdown_url_uses_content_label():
 def test_build_markdown_extra_metadata():
     processed = ProcessedContent(summary="s", key_points=[], tags=[], chunks=[])
     md = build_markdown("Title", "text", "url", "youtube", processed, extra={"channel": "TestChannel"})
-    assert 'channel: "TestChannel"' in md
+    fm = _frontmatter(md)
+    assert fm["channel"] == "TestChannel"
+
+
+def test_build_markdown_summary_with_quotes_roundtrips():
+    summary = 'the essay analyzes the film "Her": memory and loss'
+    processed = ProcessedContent(summary=summary, key_points=[], tags=["ai"], chunks=[])
+    md = build_markdown("Title", "body", "https://example.com", "url", processed)
+    fm = _frontmatter(md)
+    assert fm["summary"] == summary
+    assert fm["tags"] == ["ai"]
+
+
+def test_build_markdown_extra_with_quotes_roundtrips():
+    processed = ProcessedContent(summary="s", key_points=[], tags=[], chunks=[])
+    md = build_markdown("Title", "text", "url", "tweet", processed, extra={"author": 'the "real" one'})
+    fm = _frontmatter(md)
+    assert fm["author"] == 'the "real" one'
 
 
 # --- write to vault ---
@@ -116,7 +142,7 @@ def test_write_to_vault_nested_folder(tmp_path):
 
 def test_dedup_detects_existing(tmp_path, monkeypatch):
     """check_duplicate returns path when source was already ingested."""
-    from metis.ingest.write import check_duplicate, _save_sources_index, SOURCES_INDEX_PATH
+    from metis.ingest.write import _save_sources_index, check_duplicate
     index_path = tmp_path / "sources.json"
     monkeypatch.setattr("metis.ingest.write.SOURCES_INDEX_PATH", index_path)
 
@@ -141,7 +167,11 @@ def test_dedup_returns_none_for_new(tmp_path, monkeypatch):
 
 def test_dedup_cleans_stale_entry(tmp_path, monkeypatch):
     """if indexed file was deleted, check_duplicate cleans the entry."""
-    from metis.ingest.write import check_duplicate, _save_sources_index, _load_sources_index
+    from metis.ingest.write import (
+        _load_sources_index,
+        _save_sources_index,
+        check_duplicate,
+    )
     index_path = tmp_path / "sources.json"
     monkeypatch.setattr("metis.ingest.write.SOURCES_INDEX_PATH", index_path)
 
@@ -161,6 +191,7 @@ def test_write_link_only(tmp_path):
 
     assert path.exists()
     text = path.read_text()
-    assert "source: \"https://example.com/page\"" in text
-    assert "type: link" in text
-    assert "link only" in text
+    fm = _frontmatter(text)
+    assert fm["source"] == "https://example.com/page"
+    assert fm["type"] == "link"
+    assert "link only" in fm["summary"]

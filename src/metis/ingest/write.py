@@ -5,7 +5,9 @@ import re
 from datetime import date
 from pathlib import Path
 
-from metis.config import MetisConfig, CONFIG_DIR
+import yaml
+
+from metis.config import CONFIG_DIR, MetisConfig
 from metis.ingest.process import ProcessedContent
 
 SOURCES_INDEX_PATH = CONFIG_DIR / "sources.json"
@@ -60,25 +62,21 @@ def build_markdown(
     extra: dict | None = None,
 ) -> str:
     """build a complete markdown note with frontmatter."""
-    tags_str = ", ".join(processed.tags)
     key_points_str = "\n".join(f"- {kp}" for kp in processed.key_points)
-    today = date.today().isoformat()
 
-    # build frontmatter lines
-    fm_lines = [
-        "---",
-        f"source: \"{source_link}\"",
-        f"ingested: {today}",
-        f"tags: [{tags_str}]",
-        f"summary: \"{processed.summary}\"",
-        f"type: {source_type}",
-    ]
+    fm = {
+        "source": source_link,
+        "ingested": date.today(),
+        "tags": processed.tags,
+        "summary": processed.summary,
+        "type": source_type,
+    }
     if extra:
         for k, v in extra.items():
             if v:
-                fm_lines.append(f"{k}: \"{v}\"")
-    fm_lines.append("---")
-    frontmatter = "\n".join(fm_lines)
+                fm[k] = v
+    dumped = yaml.safe_dump(fm, default_flow_style=None, sort_keys=False, allow_unicode=True, width=1000)
+    frontmatter = f"---\n{dumped}---"
 
     # content section label varies by type
     content_label = "Transcript" if source_type == "youtube" else "Content"
