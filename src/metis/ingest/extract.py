@@ -414,6 +414,29 @@ def _extract_distill(html: str) -> tuple[str, str] | None:
     return title, text
 
 
+BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def _strip_html_body(html: str, url: str) -> tuple[str, str] | None:
+    """crude fallback: take the <title>, drop boilerplate tags, flatten to text."""
+    title_match = re.search(r"<title>(.*?)</title>", html)
+    title = title_match.group(1).strip() if title_match else _title_from_url(url)
+
+    for tag in ["script", "style", "nav", "header", "footer", "aside"]:
+        html = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", "", html, flags=re.DOTALL)
+
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if len(text) < 50:
+        return None
+
+    return title, text
+
+
 def _extract_with_httpx(url: str) -> tuple[str, str] | None:
     """last-resort extraction: fetch with httpx, strip HTML tags.
 
@@ -433,28 +456,42 @@ def _extract_with_httpx(url: str) -> tuple[str, str] | None:
     if distill:
         return distill
 
-    # generic: get title + strip body
-    title_match = re.search(r"<title>(.*?)</title>", html)
-    title = title_match.group(1).strip() if title_match else _title_from_url(url)
+    return _strip_html_body(html, url)
 
-    # remove script, style, nav, header, footer
-    for tag in ["script", "style", "nav", "header", "footer", "aside"]:
-        html = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", "", html, flags=re.DOTALL)
 
-    # strip tags
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text).strip()
+def _extract_with_browser(url: str) -> tuple[str, str] | None:
+    """fetch with a browser user-agent, then extract.
 
-    if len(text) < 50:
+    reached only when trafilatura and the metis-UA fetch both come back empty:
+    the bot-blocked case, where a site 403s non-browser agents.
+    """
+    try:
+        response = httpx.get(url, follow_redirects=True, timeout=30,
+                           headers={"User-Agent": BROWSER_UA})
+        response.raise_for_status()
+    except Exception:
         return None
 
-    return title, text
+    html = response.text
+
+    text = trafilatura.extract(html, include_comments=False, include_tables=True)
+    if text:
+        metadata = trafilatura.extract_metadata(html)
+        title = metadata.title if metadata and metadata.title else _title_from_url(url)
+        return title, text
+
+    distill = _extract_distill(html)
+    if distill:
+        return distill
+
+    return _strip_html_body(html, url)
 
 
 def extract_from_url(url: str) -> tuple[str, str]:
     """extract article text from URL. returns (title, text).
 
-    fallback chain: trafilatura → distill.js extractor → httpx + tag stripping.
+    fallback chain: trafilatura → distill.js extractor → httpx + tag stripping
+    → browser-UA fetch for sites that block non-browser agents.
     """
     # 1. trafilatura (best for standard articles)
     downloaded = trafilatura.fetch_url(url)
@@ -467,6 +504,11 @@ def extract_from_url(url: str) -> tuple[str, str]:
 
     # 2. httpx fallback (handles distill.js + large pages trafilatura can't fetch)
     result = _extract_with_httpx(url)
+    if result:
+        return result
+
+    # 3. browser-UA fetch (handles sites that 403 non-browser agents)
+    result = _extract_with_browser(url)
     if result:
         return result
 
