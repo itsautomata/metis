@@ -30,10 +30,11 @@ exec $SHELL                # restart shell to apply
 store your api keys securely:
 
 ```bash
-metis secret set openai-key
+metis secret set provider-key  # your one key (works for any provider via base_url)
 metis secret set x-token       # optional, for full x/twitter extraction
 metis secret set               # interactive, you pick which key you want to set
 metis secret list              # show which keys are set (no values)
+metis doctor                   # verify the whole setup: key, provider, models, index
 ```
 
 quick changes via `metis config vault <path>`. for everything else, edit `~/.metis/config.yaml`.
@@ -177,6 +178,8 @@ openai:
   embedding_model: text-embedding-3-small
 ```
 
-api keys are stored in your os keychain via `metis secret set`. also reads from environment variables or config file as fallback.
+api keys live in your os keychain via `metis secret set`, or a `METIS_*` env var for automation (`METIS_PROVIDER_KEY`, `METIS_EMBEDDING_KEY`, `METIS_X_BEARER`). keys never go in the config file. one key covers both chat and embeddings; set an `embedding-key` only if you split embeddings to a different provider. run `metis doctor` to check your setup: it verifies the key, the provider, the models, and the index in one pass.
 
 > changing `embedding_model` re-spaces the whole index. metis will refuse until you run `metis reindex`.
+>
+> on a gateway like OpenRouter, embedding ids are vendor-prefixed; metis auto-adapts the default `text-embedding-3-small` to `openai/text-embedding-3-small`.

@@ -13,13 +13,9 @@ DEFAULT_CONFIG = {
     "vault_path": str(Path.home() / "obsidian" / "vault"),
     "output_folder": "metis-ingested",
     "openai": {
-        "api_key": "",
         "base_url": "",
         "embedding_model": "text-embedding-3-small",
         "chat_model": "gpt-4o",
-    },
-    "x_api": {
-        "bearer_token": "",
     },
     "chromadb": {
         "path": str(CONFIG_DIR / "chromadb"),
@@ -29,15 +25,9 @@ DEFAULT_CONFIG = {
 
 @dataclass
 class OpenAIConfig:
-    api_key: str = ""
     base_url: str = ""
     embedding_model: str = "text-embedding-3-small"
     chat_model: str = "gpt-4o"
-
-
-@dataclass
-class XApiConfig:
-    bearer_token: str = ""
 
 
 @dataclass
@@ -47,7 +37,6 @@ class EmbeddingConfig:
     inactive unless base_url is set; then embeddings use this endpoint instead of openai's.
     """
     base_url: str = ""
-    api_key: str = ""
     model: str = ""
 
 
@@ -57,7 +46,6 @@ class MetisConfig:
     output_folder: str = "metis-ingested"
     openai: OpenAIConfig = field(default_factory=OpenAIConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
-    x_api: XApiConfig = field(default_factory=XApiConfig)
     chromadb_path: Path = field(default_factory=lambda: CONFIG_DIR / "chromadb")
 
 
@@ -72,12 +60,10 @@ vault_path: {d["vault_path"]}
 output_folder: {d["output_folder"]}
 
 openai:
-  api_key: "{o["api_key"]}"
-
   # base_url points at any OpenAI-compatible provider. empty = OpenAI. other providers:
   #   openrouter: https://openrouter.ai/api/v1
   #   ollama:     http://localhost:11434/v1   (local; key can be anything)
-  # put that provider's key in the openai-key slot: `metis secret set openai-key`
+  # put that provider's key in the provider-key slot: `metis secret set provider-key`
   base_url: "{o["base_url"]}"
 
   # chat/summary model. provider-specific id (gpt-4o, anthropic/claude-3.5-sonnet, llama3.1).
@@ -93,10 +79,7 @@ openai:
 # embedding:
 #   base_url: https://api.openai.com/v1
 #   model: text-embedding-3-small
-#   # key: `metis secret set embedding-key` (falls back to openai-key if unset)
-
-x_api:
-  bearer_token: "{d["x_api"]["bearer_token"]}"
+#   # key: `metis secret set embedding-key` (falls back to provider-key if unset)
 
 chromadb:
   path: {d["chromadb"]["path"]}
@@ -140,7 +123,6 @@ def load_config() -> MetisConfig:
 
     openai_raw = raw.get("openai", {})
     openai_cfg = OpenAIConfig(
-        api_key=openai_raw.get("api_key", ""),
         base_url=openai_raw.get("base_url", ""),
         embedding_model=openai_raw.get("embedding_model", "text-embedding-3-small"),
         chat_model=openai_raw.get("chat_model", "gpt-4o"),
@@ -149,13 +131,7 @@ def load_config() -> MetisConfig:
     embedding_raw = raw.get("embedding", {}) or {}
     embedding_cfg = EmbeddingConfig(
         base_url=embedding_raw.get("base_url", ""),
-        api_key=embedding_raw.get("api_key", ""),
         model=embedding_raw.get("model", ""),
-    )
-
-    x_raw = raw.get("x_api", {})
-    x_cfg = XApiConfig(
-        bearer_token=x_raw.get("bearer_token", ""),
     )
 
     chromadb_raw = raw.get("chromadb", {})
@@ -165,7 +141,6 @@ def load_config() -> MetisConfig:
         output_folder=raw.get("output_folder", "metis-ingested"),
         openai=openai_cfg,
         embedding=embedding_cfg,
-        x_api=x_cfg,
         chromadb_path=Path(chromadb_raw.get("path", str(CONFIG_DIR / "chromadb"))).expanduser(),
     )
 

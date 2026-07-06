@@ -52,6 +52,8 @@ def test_init_creates_config(tmp_path, monkeypatch):
         raw = yaml.safe_load(f)
     assert "openai" in raw
     assert "base_url" in raw["openai"]
+    assert "api_key" not in raw["openai"]  # secrets live in the keychain, not the yaml
+    assert "x_api" not in raw
     assert "azure_openai" not in raw
 
 
@@ -76,13 +78,28 @@ def test_load_config_openai(tmp_path, monkeypatch):
     config_path = config_dir / "config.yaml"
     config_path.write_text(yaml.dump({
         "vault_path": str(tmp_path / "vault"),
-        "openai": {"api_key": "sk-test", "chat_model": "gpt-4o"},
+        "openai": {"chat_model": "gpt-4o"},
     }))
     monkeypatch.setattr("metis.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("metis.config.CONFIG_PATH", config_path)
 
     config = load_config()
-    assert config.openai.api_key == "sk-test"
+    assert config.openai.chat_model == "gpt-4o"
+
+
+def test_load_config_ignores_yaml_key(tmp_path, monkeypatch):
+    """a key left in an old yaml is ignored: secrets live in the keychain, not the config."""
+    config_dir = tmp_path / ".metis"
+    config_dir.mkdir()
+    config_path = config_dir / "config.yaml"
+    config_path.write_text(yaml.dump({
+        "openai": {"api_key": "sk-should-be-ignored"},
+    }))
+    monkeypatch.setattr("metis.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("metis.config.CONFIG_PATH", config_path)
+
+    config = load_config()
+    assert not hasattr(config.openai, "api_key")
 
 
 def test_load_config_base_url(tmp_path, monkeypatch):
@@ -91,7 +108,7 @@ def test_load_config_base_url(tmp_path, monkeypatch):
     config_path = config_dir / "config.yaml"
     config_path.write_text(yaml.dump({
         "vault_path": str(tmp_path / "vault"),
-        "openai": {"api_key": "sk-test", "base_url": "https://openrouter.ai/api/v1"},
+        "openai": {"base_url": "https://openrouter.ai/api/v1"},
     }))
     monkeypatch.setattr("metis.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("metis.config.CONFIG_PATH", config_path)
@@ -109,11 +126,11 @@ def test_load_config_legacy_azure_ignored(tmp_path, monkeypatch):
         "vault_path": str(tmp_path / "vault"),
         "provider": "azure",
         "azure_openai": {"endpoint": "https://old.azure.com/", "api_key": "x"},
-        "openai": {"api_key": "sk-test"},
+        "openai": {"chat_model": "gpt-4o"},
     }))
     monkeypatch.setattr("metis.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("metis.config.CONFIG_PATH", config_path)
 
     config = load_config()
-    assert config.openai.api_key == "sk-test"
+    assert config.openai.chat_model == "gpt-4o"
     assert not hasattr(config, "provider")

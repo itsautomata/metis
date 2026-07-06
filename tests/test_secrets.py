@@ -2,15 +2,15 @@
 
 from unittest.mock import patch
 
-from metis.secrets import get_openai_key, get_secret, get_x_bearer
+from metis.secrets import get_provider_key, get_secret, get_x_bearer
 
-# --- fallback chain ---
+# --- fallback chain: keychain then env, never a config file ---
 
 @patch("metis.secrets.keyring")
 def test_get_secret_from_keychain(mock_keyring):
     """keychain is checked first."""
     mock_keyring.get_password.return_value = "keychain-value"
-    result = get_secret("test-key", fallback_env="TEST_ENV", fallback_config="config-value")
+    result = get_secret("test-key", fallback_env="TEST_ENV")
     assert result == "keychain-value"
 
 
@@ -19,24 +19,16 @@ def test_get_secret_falls_back_to_env(mock_keyring, monkeypatch):
     """if keychain is empty, env var is checked."""
     mock_keyring.get_password.return_value = None
     monkeypatch.setenv("TEST_ENV", "env-value")
-    result = get_secret("test-key", fallback_env="TEST_ENV", fallback_config="config-value")
+    result = get_secret("test-key", fallback_env="TEST_ENV")
     assert result == "env-value"
 
 
 @patch("metis.secrets.keyring")
-def test_get_secret_falls_back_to_config(mock_keyring, monkeypatch):
-    """if keychain and env are empty, config value is used."""
+def test_get_secret_returns_empty_if_nothing(mock_keyring, monkeypatch):
+    """if neither keychain nor env is set, returns empty string."""
     mock_keyring.get_password.return_value = None
     monkeypatch.delenv("TEST_ENV", raising=False)
-    result = get_secret("test-key", fallback_env="TEST_ENV", fallback_config="config-value")
-    assert result == "config-value"
-
-
-@patch("metis.secrets.keyring")
-def test_get_secret_returns_empty_if_nothing(mock_keyring, monkeypatch):
-    """if nothing is set anywhere, returns empty string."""
-    mock_keyring.get_password.return_value = None
-    result = get_secret("test-key")
+    result = get_secret("test-key", fallback_env="TEST_ENV")
     assert result == ""
 
 
@@ -49,19 +41,19 @@ def test_get_secret_keychain_error_falls_through(mock_keyring, monkeypatch):
     assert result == "env-value"
 
 
-# --- convenience functions ---
+# --- convenience functions: no args, keychain then env ---
 
 @patch("metis.secrets.get_secret")
-def test_get_openai_key(mock_get):
+def test_get_provider_key(mock_get):
     mock_get.return_value = "sk-test"
-    result = get_openai_key("config-fallback")
-    mock_get.assert_called_once_with("openai-api-key", fallback_env="METIS_OPENAI_KEY", fallback_config="config-fallback")
+    result = get_provider_key()
+    mock_get.assert_called_once_with("provider-key", fallback_env="METIS_PROVIDER_KEY")
     assert result == "sk-test"
 
 
 @patch("metis.secrets.get_secret")
 def test_get_x_bearer(mock_get):
     mock_get.return_value = "bearer-test"
-    result = get_x_bearer("config-fallback")
-    mock_get.assert_called_once_with("x-bearer-token", fallback_env="METIS_X_BEARER", fallback_config="config-fallback")
+    result = get_x_bearer()
+    mock_get.assert_called_once_with("x-bearer-token", fallback_env="METIS_X_BEARER")
     assert result == "bearer-test"

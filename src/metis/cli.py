@@ -1,5 +1,6 @@
 """metis CLI: second brain that pairs with obsidian."""
 
+import functools
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +20,36 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _provider_guard(fn):
+    """turn a provider/model failure into a clean message instead of a traceback."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        import openai
+
+        from metis.client import ProviderError
+        try:
+            return fn(*args, **kwargs)
+        except (ProviderError, openai.OpenAIError) as e:
+            console.print(f"[red]✗ {e}[/red]")
+            if isinstance(e, openai.AuthenticationError) or "401" in str(e):
+                console.print("[dim]a 401 usually means a wrong or missing key. run 'metis models' to check the key and provider.[/dim]")
+            else:
+                console.print("[dim]check the model id, base_url, and key (metis config / metis secret).[/dim]")
+            raise typer.Exit(1)
+    return wrapper
+
+
+def _key_provider(key: str) -> str:
+    """guess the provider from a key prefix (no secret revealed)."""
+    if not key:
+        return "none"
+    if key.startswith("sk-or-"):
+        return "openrouter"
+    if key.startswith("sk-"):
+        return "openai"
+    return "unknown"
 
 
 def _complete_vault_folders(incomplete: str) -> list[str]:
@@ -77,6 +108,7 @@ def _ensure_index_model(config) -> bool:
 
 
 @app.command()
+@_provider_guard
 def ingest(
     sources: list[str] = typer.Argument(help="file paths or URLs to ingest"),
     folder: Optional[str] = typer.Option(None, "--folder", "-f", help="vault subfolder to save in", autocompletion=_complete_vault_folders),
@@ -85,6 +117,7 @@ def ingest(
     pick_lang: bool = typer.Option(False, "--pick-lang", help="interactively pick transcript language (youtube)"),
 ):
     """save, summarize, tag, embed, and find links for files or URLs."""
+    from metis.client import ProviderError
     from metis.ingest.extract import extract, NoTranscriptError
     from metis.ingest.process import process
     from metis.ingest.write import write_to_vault, write_link_only, check_duplicate
@@ -135,7 +168,7 @@ def ingest(
             with spinner:
                 title, text, source_type, source_link, extra = extract(
                     source, lang=lang, pick_lang=pick_lang,
-                    x_bearer_token=get_x_bearer(config.x_api.bearer_token),
+                    x_bearer_token=get_x_bearer(),
                 )
         except NoTranscriptError:
             console.print("[yellow]! no transcript found.[/yellow]")
@@ -159,10 +192,12 @@ def ingest(
         console.print(f"  tags:   {', '.join(processed.tags)}")
         console.print(f"  chunks: {len(processed.chunks)}")
 
-        # 3. embed first — if this fails, vault stays clean
+        # 3. embed first — if this fails, vault stays clean (nothing written yet)
         try:
             with console.status("embedding and indexing..."):
                 embeddings = embed_texts(processed.chunks, config)
+        except ProviderError:
+            raise  # a model/provider config error: the guard reports it once and aborts
         except Exception as e:
             console.print(f"[red]✗ embedding failed: {e}[/red]")
             console.print("[yellow]! note was NOT saved. vault is unchanged.[/yellow]")
@@ -200,6 +235,7 @@ def ingest(
 
 
 @app.command()
+@_provider_guard
 def search(
     query: str = typer.Argument(help="what to search for"),
     limit: int = typer.Option(5, "--limit", "-n", help="number of results"),
@@ -253,6 +289,7 @@ def search(
 
 
 @app.command()
+@_provider_guard
 def chat(
     question: str = typer.Argument(help="question to ask your vault"),
     note: Optional[str] = typer.Option(None, "--note", help="scope to a specific note", autocompletion=_complete_vault_notes),
@@ -384,6 +421,7 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
 
 
 @app.command()
+@_provider_guard
 def link(
     note: Optional[str] = typer.Argument(None, help="note to find connections for (all notes if omitted)"),
     pick: bool = typer.Option(False, "--pick", "-p", help="interactively pick a note"),
@@ -445,6 +483,7 @@ def link(
 
 
 @app.command()
+@_provider_guard
 def sync():
     """re-index vault to catch manual edits."""
     from metis.index.sync import sync_vault
@@ -465,6 +504,7 @@ def sync():
 
 
 @app.command()
+@_provider_guard
 def reindex():
     """rebuild the whole index from scratch (use after changing the embedding model)."""
     from metis.index.sync import reindex_vault
@@ -552,26 +592,138 @@ def config_cmd(
 
 
 @app.command()
+def models():
+    """show the chat and embedding models in use, the resolved key, and whether the index matches."""
+    import os
+
+    import keyring
+
+    from metis.client import get_chat_model, get_embedding_model, provider_of
+    from metis.index.store import get_collection, indexed_embedding_model
+    from metis.secrets import PROVIDER_KEY, SERVICE, get_provider_key
+
+    config = load_config()
+    chat_endpoint = config.openai.base_url or "openai (default)"
+    embed_endpoint = config.embedding.base_url or config.openai.base_url or "openai (default)"
+    embed_tag = " (shared with chat)" if not config.embedding.base_url else " (separate)"
+    resolved_model = get_embedding_model(config)
+    raw_model = (config.embedding.model or config.openai.embedding_model) if config.embedding.base_url else config.openai.embedding_model
+    adapted = " [dim](adapted for openrouter)[/dim]" if resolved_model != raw_model else ""
+
+    console.print("[bold]chat[/bold]")
+    console.print(f"  model:    [magenta]{get_chat_model(config)}[/magenta]")
+    console.print(f"  provider: {chat_endpoint}")
+    console.print()
+    console.print("[bold]embedding[/bold]")
+    console.print(f"  model:    [magenta]{resolved_model}[/magenta]{adapted}")
+    console.print(f"  provider: {embed_endpoint}{embed_tag}")
+
+    collection = get_collection(config)
+    if collection.count() == 0:
+        console.print("  index:    [dim](empty)[/dim]")
+    else:
+        stamped = indexed_embedding_model(collection)
+        if stamped == resolved_model:
+            console.print(f"  index:    {stamped} [green]✓[/green]")
+        else:
+            console.print(f"  index:    {stamped} [red]✗ config says {resolved_model}, run 'metis reindex'[/red]")
+
+    # key: source + provider guess + conflict/mismatch warnings (never prints the key)
+    console.print()
+    console.print("[bold]key[/bold]")
+    kc = keyring.get_password(SERVICE, PROVIDER_KEY) or ""
+    env = os.environ.get("METIS_PROVIDER_KEY", "") or ""
+    resolved_key = get_provider_key()
+    if not resolved_key:
+        console.print("  [red]✗ no provider-key set. run 'metis secret set provider-key'[/red]")
+    else:
+        source = "keychain" if kc else "env"
+        key_prov = _key_provider(resolved_key)
+        console.print(f"  source:   {source} (looks like {key_prov})")
+        base_prov = provider_of(config.openai.base_url)
+        if key_prov in ("openai", "openrouter") and base_prov in ("openai", "openrouter") and key_prov != base_prov:
+            console.print(f"  [red]⚠ base_url is {base_prov} but the key looks like {key_prov}: likely the wrong key[/red]")
+        if len({v for v in (kc, env) if v}) > 1:
+            console.print("  [yellow]⚠ different keys in keychain and env; keychain wins. clear one to avoid confusion.[/yellow]")
+
+
+@app.command()
+def doctor():
+    """validate the setup offline and print a ✓/✗ checklist. exits non-zero if anything is off."""
+    import os
+
+    import keyring
+
+    from metis.client import get_chat_model, get_embedding_model, provider_of
+    from metis.index.store import get_collection, indexed_embedding_model
+    from metis.secrets import PROVIDER_KEY, SERVICE, get_provider_key
+
+    config = load_config()
+    ok = True
+
+    def check(passed: bool, label: str, detail: str, fix: str = "") -> None:
+        nonlocal ok
+        if passed:
+            console.print(f"  [green]✓[/green] {label:<10}{detail}")
+        else:
+            ok = False
+            tail = f" [dim]{fix}[/dim]" if fix else ""
+            console.print(f"  [red]✗[/red] {label:<10}{detail}{tail}")
+
+    base_prov = provider_of(config.openai.base_url)
+    resolved_key = get_provider_key()
+    source = "keychain" if keyring.get_password(SERVICE, PROVIDER_KEY) else "env" if os.environ.get("METIS_PROVIDER_KEY") else "none"
+    key_prov = _key_provider(resolved_key)
+    if not resolved_key:
+        check(False, "key", "not set", "run 'metis secret set provider-key'")
+    elif key_prov in ("openai", "openrouter") and base_prov in ("openai", "openrouter") and key_prov != base_prov:
+        check(False, "key", f"{source}, looks like {key_prov} but base_url is {base_prov}", "likely the wrong key")
+    else:
+        check(True, "key", f"{source} ({key_prov})")
+
+    check(True, "chat", f"{get_chat_model(config)} via {base_prov}")
+
+    resolved_model = get_embedding_model(config)
+    raw_model = (config.embedding.model or config.openai.embedding_model) if config.embedding.base_url else config.openai.embedding_model
+    adapted = " (adapted for openrouter)" if resolved_model != raw_model else ""
+    check(True, "embedding", f"{resolved_model}{adapted}")
+
+    collection = get_collection(config)
+    if collection.count() == 0:
+        check(True, "index", "empty (nothing embedded yet)")
+    else:
+        stamped = indexed_embedding_model(collection)
+        matches = stamped == resolved_model
+        check(matches, "index", f"built with {stamped}", "" if matches else "run 'metis reindex'")
+
+    console.print()
+    if ok:
+        console.print("[bold green]✓ metis is ready.[/bold green]")
+    else:
+        console.print("[bold red]✗ setup has issues. fix the marked lines above.[/bold red]")
+        raise typer.Exit(1)
+
+
+@app.command()
 def secret(
     action: str = typer.Argument(help="'set', 'delete', or 'list'"),
-    name: Optional[str] = typer.Argument(None, help="key name: openai-key, embedding-key, x-token"),
+    name: Optional[str] = typer.Argument(None, help="key name: provider-key, embedding-key, x-token"),
 ):
     """manage api keys in the OS keychain."""
-    from metis.secrets import set_secret, delete_secret, OPENAI_KEY, EMBEDDING_KEY, X_BEARER
+    from metis.secrets import set_secret, delete_secret, PROVIDER_KEY, EMBEDDING_KEY, X_BEARER
 
     key_map = {
-        "openai-key": OPENAI_KEY,
+        "provider-key": PROVIDER_KEY,
         "embedding-key": EMBEDDING_KEY,
         "x-token": X_BEARER,
     }
 
     if action == "list":
-        from metis.secrets import get_embedding_key, get_openai_key, get_x_bearer
-        config = load_config()
+        from metis.secrets import get_embedding_key, get_provider_key, get_x_bearer
         resolved = {
-            "openai-key": get_openai_key(config.openai.api_key),
-            "embedding-key": get_embedding_key(config.embedding.api_key),
-            "x-token": get_x_bearer(config.x_api.bearer_token),
+            "provider-key": get_provider_key(),
+            "embedding-key": get_embedding_key(),
+            "x-token": get_x_bearer(),
         }
         for display_name in key_map:
             status = "[green]set[/green]" if resolved[display_name] else "[dim]not set[/dim]"

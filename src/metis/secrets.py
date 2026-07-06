@@ -7,17 +7,16 @@ import keyring
 SERVICE = "metis"
 
 # key names in the keychain
-OPENAI_KEY = "openai-api-key"
+PROVIDER_KEY = "provider-key"
 EMBEDDING_KEY = "embedding-api-key"
 X_BEARER = "x-bearer-token"
 
 
-def get_secret(name: str, fallback_env: str = "", fallback_config: str = "") -> str:
-    """retrieve a secret. checks: keychain → env var → config file value.
+def get_secret(name: str, fallback_env: str = "") -> str:
+    """retrieve a secret. checks the keychain, then the env var. empty string if neither.
 
-    returns empty string if not found anywhere.
+    secrets never live in the config file: the keychain is the home, env is the override.
     """
-    # 1. keychain (most secure)
     try:
         value = keyring.get_password(SERVICE, name)
         if value:
@@ -25,14 +24,12 @@ def get_secret(name: str, fallback_env: str = "", fallback_config: str = "") -> 
     except Exception:
         pass
 
-    # 2. environment variable
     if fallback_env:
         value = os.environ.get(fallback_env, "")
         if value:
             return value
 
-    # 3. config file value (least secure, last resort)
-    return fallback_config
+    return ""
 
 
 def set_secret(name: str, value: str) -> None:
@@ -48,13 +45,13 @@ def delete_secret(name: str) -> None:
         pass
 
 
-def get_openai_key(config_value: str = "") -> str:
-    return get_secret(OPENAI_KEY, fallback_env="METIS_OPENAI_KEY", fallback_config=config_value)
+def get_provider_key() -> str:
+    return get_secret(PROVIDER_KEY, fallback_env="METIS_PROVIDER_KEY")
 
 
-def get_embedding_key(config_value: str = "") -> str:
-    return get_secret(EMBEDDING_KEY, fallback_env="METIS_EMBEDDING_KEY", fallback_config=config_value)
+def get_embedding_key() -> str:
+    return get_secret(EMBEDDING_KEY, fallback_env="METIS_EMBEDDING_KEY")
 
 
-def get_x_bearer(config_value: str = "") -> str:
-    return get_secret(X_BEARER, fallback_env="METIS_X_BEARER", fallback_config=config_value)
+def get_x_bearer() -> str:
+    return get_secret(X_BEARER, fallback_env="METIS_X_BEARER")
