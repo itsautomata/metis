@@ -113,13 +113,17 @@ def ingest(
         console.print(f"[bold]ingesting:[/bold] {source}")
 
         # 1. extract
-        console.print("[dim]extracting text...[/dim]")
         try:
+            from contextlib import nullcontext
+
             from metis.secrets import get_x_bearer
-            title, text, source_type, source_link, extra = extract(
-                source, lang=lang, pick_lang=pick_lang,
-                x_bearer_token=get_x_bearer(config.x_api.bearer_token),
-            )
+            # --pick-lang opens an interactive prompt; a spinner would fight it
+            spinner = nullcontext() if pick_lang else console.status("extracting text...")
+            with spinner:
+                title, text, source_type, source_link, extra = extract(
+                    source, lang=lang, pick_lang=pick_lang,
+                    x_bearer_token=get_x_bearer(config.x_api.bearer_token),
+                )
         except NoTranscriptError:
             console.print("[yellow]no transcript found.[/yellow]")
             save = typer.confirm("save link anyway?")
@@ -137,15 +141,15 @@ def ingest(
         console.print(f"  chars: {len(text)}")
 
         # 2. summarize + tag + chunk
-        console.print(f"[dim]processing with {config.provider}...[/dim]")
-        processed = process(text, config)
+        with console.status(f"processing with {config.provider}..."):
+            processed = process(text, config)
         console.print(f"  tags:   {', '.join(processed.tags)}")
         console.print(f"  chunks: {len(processed.chunks)}")
 
         # 3. embed first — if this fails, vault stays clean
-        console.print("[dim]embedding and indexing...[/dim]")
         try:
-            embeddings = embed_texts(processed.chunks, config)
+            with console.status("embedding and indexing..."):
+                embeddings = embed_texts(processed.chunks, config)
         except Exception as e:
             console.print(f"[red]embedding failed: {e}[/red]")
             console.print("[yellow]note was NOT saved. vault is unchanged.[/yellow]")
@@ -193,7 +197,8 @@ def search(
     config = load_config()
     console.print(f"[bold]searching:[/bold] {query}\n")
 
-    results = search_vault(query, config, limit=limit)
+    with console.status("searching..."):
+        results = search_vault(query, config, limit=limit)
 
     if not results:
         console.print("[yellow]no results. ingest some content first.[/yellow]")
@@ -222,7 +227,8 @@ def search(
     if selected:
         console.print(f"\n[bold]opening chat for:[/bold] {Path(selected).stem}\n")
         from metis.chat import ask
-        answer, sources, confidence = ask(query, config, note_path=selected)
+        with console.status("thinking..."):
+            answer, sources, confidence = ask(query, config, note_path=selected)
         console.print(answer)
         console.print()
         if sources:
@@ -268,7 +274,8 @@ def chat(
 
     console.print(f"[bold]asking:[/bold] {question}\n")
 
-    answer, sources, confidence = ask(question, config, note_path=note_path)
+    with console.status("thinking..."):
+        answer, sources, confidence = ask(question, config, note_path=note_path)
 
     console.print(answer)
     console.print()
@@ -393,7 +400,8 @@ def link(
     target = note or "all notes"
     console.print(f"[bold]linking:[/bold] {target}\n")
 
-    connections = find_connections(config, note_path=note_path, min_score=min_score)
+    with console.status("finding connections..."):
+        connections = find_connections(config, note_path=note_path, min_score=min_score)
 
     if not connections:
         console.print("[yellow]no connections found above threshold.[/yellow]")
