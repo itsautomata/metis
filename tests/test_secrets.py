@@ -1,10 +1,8 @@
 """tests for secret management."""
 
-import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from metis.secrets import get_secret, get_openai_key, get_azure_key, get_x_bearer
-
+from metis.secrets import get_openai_key, get_secret, get_x_bearer
 
 # --- fallback chain ---
 
@@ -59,14 +57,6 @@ def test_get_openai_key(mock_get):
     result = get_openai_key("config-fallback")
     mock_get.assert_called_once_with("openai-api-key", fallback_env="METIS_OPENAI_KEY", fallback_config="config-fallback")
     assert result == "sk-test"
-
-
-@patch("metis.secrets.get_secret")
-def test_get_azure_key(mock_get):
-    mock_get.return_value = "azure-test"
-    result = get_azure_key("config-fallback")
-    mock_get.assert_called_once_with("azure-api-key", fallback_env="METIS_AZURE_KEY", fallback_config="config-fallback")
-    assert result == "azure-test"
 
 
 @patch("metis.secrets.get_secret")

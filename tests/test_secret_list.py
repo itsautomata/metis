@@ -16,7 +16,6 @@ def test_list_reports_env_var_key_as_set(monkeypatch):
     monkeypatch.setattr("metis.cli.load_config", lambda: MetisConfig())
     monkeypatch.setattr("metis.secrets.keyring.get_password", lambda *a, **k: None)
     monkeypatch.setenv("METIS_OPENAI_KEY", "sk-live-from-env")
-    monkeypatch.delenv("METIS_AZURE_KEY", raising=False)
     monkeypatch.delenv("METIS_X_BEARER", raising=False)
 
     result = runner.invoke(app, ["secret", "list"])
@@ -28,9 +27,20 @@ def test_list_reports_env_var_key_as_set(monkeypatch):
 def test_list_reports_absent_key_as_not_set(monkeypatch):
     monkeypatch.setattr("metis.cli.load_config", lambda: MetisConfig())
     monkeypatch.setattr("metis.secrets.keyring.get_password", lambda *a, **k: None)
-    monkeypatch.delenv("METIS_AZURE_KEY", raising=False)
+    monkeypatch.delenv("METIS_X_BEARER", raising=False)
 
     result = runner.invoke(app, ["secret", "list"])
 
     assert result.exit_code == 0
-    assert "not set" in _line(result.stdout, "azure-key")
+    assert "not set" in _line(result.stdout, "x-token")
+
+
+def test_list_includes_embedding_key(monkeypatch):
+    monkeypatch.setattr("metis.cli.load_config", lambda: MetisConfig())
+    monkeypatch.setattr("metis.secrets.keyring.get_password", lambda *a, **k: None)
+    monkeypatch.setenv("METIS_EMBEDDING_KEY", "sk-embed-from-env")
+
+    result = runner.invoke(app, ["secret", "list"])
+
+    assert result.exit_code == 0
+    assert "not set" not in _line(result.stdout, "embedding-key")

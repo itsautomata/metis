@@ -34,6 +34,14 @@ def _save_categorization(data: dict) -> None:
     CATEGORIZATION_PATH.write_text(json.dumps(data, indent=2))
 
 
+def clear_folder_embeddings() -> None:
+    """drop cached folder embeddings so they recompute; called when the embedding model changes."""
+    data = _load_categorization()
+    if data.get("folder_embeddings"):
+        data["folder_embeddings"] = {}
+        _save_categorization(data)
+
+
 # --- folder descriptions ---
 
 def _auto_describe_folder(folder: str, config: MetisConfig) -> str:

@@ -8,7 +8,7 @@ SERVICE = "metis"
 
 # key names in the keychain
 OPENAI_KEY = "openai-api-key"
-AZURE_KEY = "azure-api-key"
+EMBEDDING_KEY = "embedding-api-key"
 X_BEARER = "x-bearer-token"
 
 
@@ -52,8 +52,8 @@ def get_openai_key(config_value: str = "") -> str:
     return get_secret(OPENAI_KEY, fallback_env="METIS_OPENAI_KEY", fallback_config=config_value)
 
 
-def get_azure_key(config_value: str = "") -> str:
-    return get_secret(AZURE_KEY, fallback_env="METIS_AZURE_KEY", fallback_config=config_value)
+def get_embedding_key(config_value: str = "") -> str:
+    return get_secret(EMBEDDING_KEY, fallback_env="METIS_EMBEDDING_KEY", fallback_config=config_value)
 
 
 def get_x_bearer(config_value: str = "") -> str:

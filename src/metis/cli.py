@@ -65,6 +65,17 @@ def _complete_vault_notes(incomplete: str) -> list[str]:
         return []
 
 
+def _ensure_index_model(config) -> bool:
+    """False (and prints guidance) if the index was built with a different embedding model."""
+    from metis.index.store import EmbeddingModelMismatch, check_embedding_model
+    try:
+        check_embedding_model(config)
+        return True
+    except EmbeddingModelMismatch as e:
+        console.print(f"[red]✗ {e}[/red]")
+        return False
+
+
 @app.command()
 def ingest(
     sources: list[str] = typer.Argument(help="file paths or URLs to ingest"),
@@ -81,6 +92,8 @@ def ingest(
     from metis.index.store import store_chunks_with_embeddings
 
     config = load_config()
+    if not _ensure_index_model(config):
+        return
 
     if pick_folder_flag and not folder:
         from metis.pick import pick_folder
@@ -141,7 +154,7 @@ def ingest(
         console.print(f"  chars: {len(text):,}")
 
         # 2. summarize + tag + chunk
-        with console.status(f"processing with {config.provider}..."):
+        with console.status(f"processing with {config.openai.chat_model}..."):
             processed = process(text, config)
         console.print(f"  tags:   {', '.join(processed.tags)}")
         console.print(f"  chunks: {len(processed.chunks)}")
@@ -195,6 +208,8 @@ def search(
     from metis.search import search_vault
 
     config = load_config()
+    if not _ensure_index_model(config):
+        return
     console.print(f"[bold]searching:[/bold] {query}\n")
 
     with console.status("searching..."):
@@ -249,6 +264,8 @@ def chat(
     from metis.chat import ask, save_qa_to_note, LOW_CONFIDENCE_THRESHOLD
 
     config = load_config()
+    if not _ensure_index_model(config):
+        return
 
     if pick and not note:
         from metis.pick import pick_note
@@ -378,6 +395,8 @@ def link(
     from metis.link import find_connections, write_links, explain_connection
 
     config = load_config()
+    if not _ensure_index_model(config):
+        return
 
     if pick and not note:
         from metis.pick import pick_note
@@ -431,6 +450,8 @@ def sync():
     from metis.index.sync import sync_vault
 
     config = load_config()
+    if not _ensure_index_model(config):
+        return
     console.print(f"[bold]syncing:[/bold] {config.vault_path}\n")
 
     report = sync_vault(config)
@@ -441,6 +462,25 @@ def sync():
     console.print(f"  unchanged: {report.unchanged} files")
     console.print()
     console.print(f"[bold green]✓ vault indexed.[/bold green] {report.total_files} files.")
+
+
+@app.command()
+def reindex():
+    """rebuild the whole index from scratch (use after changing the embedding model)."""
+    from metis.index.sync import reindex_vault
+
+    config = load_config()
+    model = config.openai.embedding_model
+    console.print(f"[bold]reindexing:[/bold] {config.vault_path}")
+    console.print(f"  embedding model: [magenta]{model}[/magenta]\n")
+    if not typer.confirm(f"re-embed every note with {model}? (costs one embedding call per chunk)"):
+        return
+
+    with console.status("re-embedding the whole vault..."):
+        report = reindex_vault(config)
+
+    console.print(f"  reindexed: {report.total_files} files, {report.total_chunks} chunks")
+    console.print("[bold green]✓ index rebuilt.[/bold green]")
 
 
 @app.command()
@@ -461,12 +501,12 @@ def init():
 
 
 def _complete_config_keys(incomplete: str) -> list[str]:
-    return [k for k in ["vault", "folder", "provider"] if k.startswith(incomplete)]
+    return [k for k in ["vault", "folder"] if k.startswith(incomplete)]
 
 
 @app.command(name="config")
 def config_cmd(
-    key: Optional[str] = typer.Argument(None, help="setting: vault, folder, provider", autocompletion=_complete_config_keys),
+    key: Optional[str] = typer.Argument(None, help="setting: vault, folder", autocompletion=_complete_config_keys),
     value: Optional[str] = typer.Argument(None, help="new value"),
 ):
     """view or change metis settings."""
@@ -481,7 +521,6 @@ def config_cmd(
     config_keys = {
         "vault": "vault_path",
         "folder": "output_folder",
-        "provider": "provider",
     }
 
     # no args: show current settings
@@ -489,7 +528,7 @@ def config_cmd(
         config = load_config()
         console.print(f"  vault:    {config.vault_path}")
         console.print(f"  folder:   {config.output_folder}")
-        console.print(f"  provider: {config.provider}")
+        console.print(f"  base_url: {config.openai.base_url or 'default (openai)'}")
         console.print(f"\n[dim]{CONFIG_PATH}[/dim]")
         return
 
@@ -515,39 +554,27 @@ def config_cmd(
 @app.command()
 def secret(
     action: str = typer.Argument(help="'set', 'delete', or 'list'"),
-    name: Optional[str] = typer.Argument(None, help="key name: openai-key, azure-key, x-token"),
+    name: Optional[str] = typer.Argument(None, help="key name: openai-key, embedding-key, x-token"),
 ):
     """manage api keys in the OS keychain."""
-    from metis.secrets import set_secret, delete_secret, OPENAI_KEY, AZURE_KEY, X_BEARER
+    from metis.secrets import set_secret, delete_secret, OPENAI_KEY, EMBEDDING_KEY, X_BEARER
 
     key_map = {
         "openai-key": OPENAI_KEY,
-        "azure-key": AZURE_KEY,
+        "embedding-key": EMBEDDING_KEY,
         "x-token": X_BEARER,
-        "azure-search-endpoint": "azure-search-endpoint",
-        "azure-search-key": "azure-search-key",
-        "discord-token": "discord-token",
-        "azure-storage-connection": "azure-storage-connection",
     }
 
     if action == "list":
-        from metis.secrets import (
-            get_azure_key,
-            get_openai_key,
-            get_secret,
-            get_x_bearer,
-        )
+        from metis.secrets import get_embedding_key, get_openai_key, get_x_bearer
         config = load_config()
         resolved = {
             "openai-key": get_openai_key(config.openai.api_key),
-            "azure-key": get_azure_key(config.azure.api_key),
+            "embedding-key": get_embedding_key(config.embedding.api_key),
             "x-token": get_x_bearer(config.x_api.bearer_token),
         }
-        for display_name, keychain_name in key_map.items():
-            value = resolved.get(display_name)
-            if value is None:
-                value = get_secret(keychain_name)
-            status = "[green]set[/green]" if value else "[dim]not set[/dim]"
+        for display_name in key_map:
+            status = "[green]set[/green]" if resolved[display_name] else "[dim]not set[/dim]"
             console.print(f"  {display_name}: {status}")
         return
 
@@ -686,6 +713,8 @@ def health(
     from metis.health import run_health
 
     config = load_config()
+    if not _ensure_index_model(config):
+        return
     vault = config.vault_path
 
     def _short(fp: str) -> str:

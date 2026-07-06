@@ -1,9 +1,11 @@
-"""vault sync — re-index changed, new, and deleted files."""
+"""vault sync: re-index changed, new, and deleted files."""
 
 import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+
+import chromadb
 
 from metis.config import MetisConfig, CONFIG_DIR
 from metis.ingest.process import chunk_text
@@ -120,3 +122,27 @@ def sync_vault(config: MetisConfig) -> SyncReport:
     _save_sync_state(new_state)
 
     return report
+
+
+def reindex_vault(config: MetisConfig) -> SyncReport:
+    """drop the index and re-embed the whole vault with the current embedding model.
+
+    used after changing `embedding_model`: the old vectors live in a different space,
+    so everything must be rebuilt. also drops state tied to the old space.
+    """
+    from metis.classify import clear_folder_embeddings
+    from metis.index.store import COLLECTION_NAME
+
+    # drop the collection so its embedding-model stamp resets to the current model
+    client = chromadb.PersistentClient(path=str(config.chromadb_path))
+    try:
+        client.delete_collection(COLLECTION_NAME)
+    except Exception:
+        pass  # nothing to drop on a fresh vault
+
+    # forget sync state so every file re-embeds; drop the folder-embedding cache (old space)
+    if SYNC_STATE_PATH.exists():
+        SYNC_STATE_PATH.unlink()
+    clear_folder_embeddings()
+
+    return sync_vault(config)

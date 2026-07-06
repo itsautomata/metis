@@ -12,15 +12,9 @@ CONFIG_PATH = CONFIG_DIR / "config.yaml"
 DEFAULT_CONFIG = {
     "vault_path": str(Path.home() / "obsidian" / "vault"),
     "output_folder": "metis-ingested",
-    "provider": "openai",
     "openai": {
         "api_key": "",
-        "embedding_model": "text-embedding-3-small",
-        "chat_model": "gpt-4o",
-    },
-    "azure_openai": {
-        "endpoint": "",
-        "api_key": "",
+        "base_url": "",
         "embedding_model": "text-embedding-3-small",
         "chat_model": "gpt-4o",
     },
@@ -36,14 +30,7 @@ DEFAULT_CONFIG = {
 @dataclass
 class OpenAIConfig:
     api_key: str = ""
-    embedding_model: str = "text-embedding-3-small"
-    chat_model: str = "gpt-4o"
-
-
-@dataclass
-class AzureConfig:
-    endpoint: str = ""
-    api_key: str = ""
+    base_url: str = ""
     embedding_model: str = "text-embedding-3-small"
     chat_model: str = "gpt-4o"
 
@@ -54,14 +41,66 @@ class XApiConfig:
 
 
 @dataclass
+class EmbeddingConfig:
+    """optional override to run embeddings on a different provider than chat.
+
+    inactive unless base_url is set; then embeddings use this endpoint instead of openai's.
+    """
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+
+
+@dataclass
 class MetisConfig:
     vault_path: Path = field(default_factory=lambda: Path.home() / "obsidian" / "vault")
     output_folder: str = "metis-ingested"
-    provider: str = "openai"
     openai: OpenAIConfig = field(default_factory=OpenAIConfig)
-    azure: AzureConfig = field(default_factory=AzureConfig)
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     x_api: XApiConfig = field(default_factory=XApiConfig)
     chromadb_path: Path = field(default_factory=lambda: CONFIG_DIR / "chromadb")
+
+
+def _default_config_yaml() -> str:
+    """the starter config with inline guidance. values come from DEFAULT_CONFIG so they can't drift."""
+    d = DEFAULT_CONFIG
+    o = d["openai"]
+    return f"""\
+# metis config. api keys live in the OS keychain (`metis secret set`), not here.
+
+vault_path: {d["vault_path"]}
+output_folder: {d["output_folder"]}
+
+openai:
+  api_key: "{o["api_key"]}"
+
+  # base_url points at any OpenAI-compatible provider. empty = OpenAI. other providers:
+  #   openrouter: https://openrouter.ai/api/v1
+  #   ollama:     http://localhost:11434/v1   (local; key can be anything)
+  # put that provider's key in the openai-key slot: `metis secret set openai-key`
+  base_url: "{o["base_url"]}"
+
+  # chat/summary model. provider-specific id (gpt-4o, anthropic/claude-3.5-sonnet, llama3.1).
+  # must support JSON mode, or summaries and tags come back empty.
+  chat_model: {o["chat_model"]}
+
+  # embedding model. changing this re-spaces the whole index:
+  # metis refuses search/link/health until you run `metis reindex`.
+  embedding_model: {o["embedding_model"]}
+
+# optional: run embeddings on a DIFFERENT provider than chat (e.g. chat via
+# openrouter, embeddings direct on openai). omit this block to embed via `openai` above.
+# embedding:
+#   base_url: https://api.openai.com/v1
+#   model: text-embedding-3-small
+#   # key: `metis secret set embedding-key` (falls back to openai-key if unset)
+
+x_api:
+  bearer_token: "{d["x_api"]["bearer_token"]}"
+
+chromadb:
+  path: {d["chromadb"]["path"]}
+"""
 
 
 def init_config() -> Path:
@@ -71,7 +110,7 @@ def init_config() -> Path:
 
     if not CONFIG_PATH.exists():
         with open(CONFIG_PATH, "w") as f:
-            yaml.dump(DEFAULT_CONFIG, f, default_flow_style=False, sort_keys=False)
+            f.write(_default_config_yaml())
         os.chmod(CONFIG_PATH, 0o600)  # owner-only read/write
     else:
         # merge missing keys into existing config
@@ -99,21 +138,19 @@ def load_config() -> MetisConfig:
     with open(CONFIG_PATH) as f:
         raw = yaml.safe_load(f) or {}
 
-    provider = raw.get("provider", "openai")
-
     openai_raw = raw.get("openai", {})
     openai_cfg = OpenAIConfig(
         api_key=openai_raw.get("api_key", ""),
+        base_url=openai_raw.get("base_url", ""),
         embedding_model=openai_raw.get("embedding_model", "text-embedding-3-small"),
         chat_model=openai_raw.get("chat_model", "gpt-4o"),
     )
 
-    azure_raw = raw.get("azure_openai", {})
-    azure_cfg = AzureConfig(
-        endpoint=azure_raw.get("endpoint", ""),
-        api_key=azure_raw.get("api_key", ""),
-        embedding_model=azure_raw.get("embedding_model", "text-embedding-3-small"),
-        chat_model=azure_raw.get("chat_model", "gpt-4o"),
+    embedding_raw = raw.get("embedding", {}) or {}
+    embedding_cfg = EmbeddingConfig(
+        base_url=embedding_raw.get("base_url", ""),
+        api_key=embedding_raw.get("api_key", ""),
+        model=embedding_raw.get("model", ""),
     )
 
     x_raw = raw.get("x_api", {})
@@ -126,9 +163,8 @@ def load_config() -> MetisConfig:
     return MetisConfig(
         vault_path=Path(raw.get("vault_path", DEFAULT_CONFIG["vault_path"])).expanduser(),
         output_folder=raw.get("output_folder", "metis-ingested"),
-        provider=provider,
         openai=openai_cfg,
-        azure=azure_cfg,
+        embedding=embedding_cfg,
         x_api=x_cfg,
         chromadb_path=Path(chromadb_raw.get("path", str(CONFIG_DIR / "chromadb"))).expanduser(),
     )

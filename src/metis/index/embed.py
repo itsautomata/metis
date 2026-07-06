@@ -1,6 +1,6 @@
 """embedding generation via OpenAI."""
 
-from metis.client import get_client, get_embedding_model
+from metis.client import get_embedding_client, get_embedding_model
 from metis.config import MetisConfig
 
 BATCH_SIZE = 40
@@ -11,7 +11,7 @@ def embed_texts(texts: list[str], config: MetisConfig) -> list[list[float]]:
     if not texts:
         return []
 
-    client = get_client(config)
+    client = get_embedding_client(config)
     model = get_embedding_model(config)
 
     # filter out empty strings (openai rejects them)

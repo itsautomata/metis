@@ -31,13 +31,12 @@ store your api keys securely:
 
 ```bash
 metis secret set openai-key
-metis secret set azure-key     # if using azure
 metis secret set x-token       # optional, for full x/twitter extraction
 metis secret set               # interactive, you pick which key you want to set
 metis secret list              # show which keys are set (no values)
 ```
 
-quick changes via `metis config vault <path>` or `metis config provider azure`. for everything else, edit `~/.metis/config.yaml`.
+quick changes via `metis config vault <path>`. for everything else, edit `~/.metis/config.yaml`.
 
 ---
 
@@ -114,6 +113,18 @@ re-indexes the vault after you edit notes in obsidian.
 
 ---
 
+### reindex
+
+```bash
+metis reindex
+```
+
+rebuilds the whole vector index from scratch. run it after changing your
+`embedding_model`: the old vectors live in a different space, so metis refuses
+search/link/health until you reindex.
+
+---
+
 ## classification & clustering
 
 metis learns from your vault to help you organize.
@@ -147,7 +158,6 @@ list folders with their ML descriptions. `--edit` opens in your editor to refine
 ```bash
 metis config                       # show current settings
 metis config vault ~/obsidian/my-vault
-metis config provider azure
 metis config folder metis-ingested
 ```
 
@@ -159,13 +169,14 @@ for anything not covered above, edit `~/.metis/config.yaml`:
 vault_path: ~/obsidian/my-vault
 output_folder: metis-ingested
 
-# option a: regular openai
-provider: openai
-
-# option b: azure openai
-provider: azure
-azure_openai:
-  endpoint: https://your-resource.openai.azure.com/
+openai:
+  # base_url points at any OpenAI-compatible provider.
+  # leave empty for OpenAI; set it for OpenRouter, Ollama, a local server, etc.
+  base_url: ""              # e.g. https://openrouter.ai/api/v1
+  chat_model: gpt-4o
+  embedding_model: text-embedding-3-small
 ```
 
 api keys are stored in your os keychain via `metis secret set`. also reads from environment variables or config file as fallback.
+
+> changing `embedding_model` re-spaces the whole index. metis will refuse until you run `metis reindex`.
