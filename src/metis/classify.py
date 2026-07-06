@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
-from metis.config import CONFIG_DIR, MetisConfig
+from metis.config import CONFIG_DIR, MetisConfig, vault_folders
 from metis.index.embed import embed_texts
 from metis.index.store import get_collection
 
@@ -35,16 +35,6 @@ def _save_categorization(data: dict) -> None:
 
 
 # --- folder descriptions ---
-
-def _get_vault_folders(config: MetisConfig) -> list[str]:
-    """list all folders in the vault (relative paths)."""
-    vault = config.vault_path
-    return sorted(
-        str(p.relative_to(vault))
-        for p in vault.rglob("*")
-        if p.is_dir() and not p.name.startswith(".")
-    )
-
 
 def _auto_describe_folder(folder: str, config: MetisConfig) -> str:
     """generate a description from frontmatter of existing notes.
@@ -100,7 +90,7 @@ def get_folder_embeddings(config: MetisConfig) -> dict[str, list[float]]:
     cached = data.get("folder_embeddings", {})
     descriptions = data.get("folder_descriptions", {})
 
-    folders = _get_vault_folders(config)
+    folders = vault_folders(config)
     if not folders:
         return {}
 
@@ -207,7 +197,7 @@ def knn_scores(note_embedding: list[float], config: MetisConfig, k: int = 5) -> 
 
 def _avg_notes_per_folder(config: MetisConfig) -> float:
     """average number of notes per folder in the vault."""
-    folders = _get_vault_folders(config)
+    folders = vault_folders(config)
     if not folders:
         return 0
 

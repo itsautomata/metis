@@ -132,3 +132,18 @@ def load_config() -> MetisConfig:
         x_api=x_cfg,
         chromadb_path=Path(chromadb_raw.get("path", str(CONFIG_DIR / "chromadb"))).expanduser(),
     )
+
+
+def vault_folders(config: MetisConfig) -> list[str]:
+    """vault subfolders as sorted relative paths, excluding symlinks that escape the vault."""
+    vault = config.vault_path
+    if not vault.exists():
+        return []
+    vault_resolved = vault.resolve()
+    return sorted(
+        str(p.relative_to(vault))
+        for p in vault.rglob("*")
+        if p.is_dir()
+        and not p.name.startswith(".")
+        and p.resolve().is_relative_to(vault_resolved)
+    )

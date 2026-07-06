@@ -21,14 +21,14 @@ def test_selecting_a_suggestion_returns_it(monkeypatch):
 def test_pick_existing_opens_folder_submenu(monkeypatch):
     calls = iter([pick._PICK_EXISTING, "existing/folder"])  # main menu, then sub-menu
     monkeypatch.setattr(pick.questionary, "select", lambda *a, **k: _FakeAsk(next(calls)))
-    monkeypatch.setattr(pick, "_vault_folders", lambda config: ["existing/folder", "other"])
+    monkeypatch.setattr(pick, "vault_folders", lambda config: ["existing/folder", "other"])
     result = pick.pick_suggested_folder([("x", 0.5)], MetisConfig())
     assert result == "existing/folder"
 
 
 def test_pick_existing_with_no_folders_returns_none(monkeypatch):
     monkeypatch.setattr(pick.questionary, "select", lambda *a, **k: _FakeAsk(pick._PICK_EXISTING))
-    monkeypatch.setattr(pick, "_vault_folders", lambda config: [])
+    monkeypatch.setattr(pick, "vault_folders", lambda config: [])
     result = pick.pick_suggested_folder([("x", 0.5)], MetisConfig())
     assert result is None
 
@@ -60,18 +60,3 @@ def test_typed_new_name_traversal_blocked(tmp_path):
     chosen = "../../etc"
     resolved = (vault / chosen).resolve()
     assert not resolved.is_relative_to(vault.resolve())
-
-
-def test_vault_folders_excludes_symlink_escaping_vault(tmp_path):
-    """a symlinked dir pointing outside the vault is not offered as a choice."""
-    vault = tmp_path / "vault"
-    vault.mkdir()
-    (vault / "real").mkdir()
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (vault / "escape").symlink_to(outside)
-
-    folders = pick._vault_folders(MetisConfig(vault_path=vault))
-
-    assert "real" in folders
-    assert "escape" not in folders

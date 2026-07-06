@@ -1,9 +1,33 @@
 """tests for configuration loading."""
 
-import yaml
-from pathlib import Path
 
-from metis.config import MetisConfig, load_config, init_config, CONFIG_DIR
+import yaml
+
+from metis.config import (
+    MetisConfig,
+    init_config,
+    load_config,
+    vault_folders,
+)
+
+
+def test_vault_folders_excludes_symlink_escaping_vault(tmp_path):
+    """a symlinked dir pointing outside the vault is not listed, so it can't be picked or suggested."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "real").mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (vault / "escape").symlink_to(outside)
+
+    folders = vault_folders(MetisConfig(vault_path=vault))
+
+    assert "real" in folders
+    assert "escape" not in folders
+
+
+def test_vault_folders_missing_vault_returns_empty(tmp_path):
+    assert vault_folders(MetisConfig(vault_path=tmp_path / "nope")) == []
 
 
 def test_default_config_values():

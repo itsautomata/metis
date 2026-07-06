@@ -590,14 +590,15 @@ def folders(
     import subprocess
     import tempfile
     from metis.classify import (
-        _get_vault_folders, _auto_describe_folder, _load_categorization, _save_categorization,
+        _auto_describe_folder, _load_categorization, _save_categorization,
         get_folder_embeddings,
     )
+    from metis.config import vault_folders
 
     config = load_config()
-    vault_folders = _get_vault_folders(config)
+    folders = vault_folders(config)
 
-    if not vault_folders:
+    if not folders:
         console.print("[yellow]! no folders in vault.[/yellow]")
         return
 
@@ -605,7 +606,7 @@ def folders(
     descriptions = data.get("folder_descriptions", {})
 
     # ensure all folders have descriptions
-    for f in vault_folders:
+    for f in folders:
         if f not in descriptions:
             descriptions[f] = _auto_describe_folder(f, config)
     data["folder_descriptions"] = descriptions
@@ -617,7 +618,7 @@ def folders(
             tmp.write("# folder descriptions\n")
             tmp.write("# edit descriptions below. one per line: folder: description\n")
             tmp.write("# save and close to apply.\n\n")
-            for f in vault_folders:
+            for f in folders:
                 tmp.write(f"{f}: {descriptions.get(f, '')}\n")
             tmp_path = tmp.name
 
@@ -634,7 +635,7 @@ def folders(
                 if ": " in line:
                     folder, desc = line.split(": ", 1)
                     folder = folder.strip()
-                    if folder in vault_folders:
+                    if folder in folders:
                         updated[folder] = desc.strip()
 
         os.unlink(tmp_path)
@@ -667,7 +668,7 @@ def folders(
 
     else:
         # list mode
-        for f in vault_folders:
+        for f in folders:
             note_count = len(list((config.vault_path / f).glob("*.md")))
             desc = descriptions.get(f, "")
             console.print(f"[bold magenta]{f}[/bold magenta] ({note_count} notes)")

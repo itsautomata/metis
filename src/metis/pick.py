@@ -5,7 +5,7 @@ from pathlib import Path
 import questionary
 from questionary import Style
 
-from metis.config import MetisConfig
+from metis.config import MetisConfig, vault_folders
 
 STYLE = Style([
     ("qmark", "fg:magenta bold"),
@@ -47,24 +47,9 @@ def pick_note(config: MetisConfig) -> str | None:
     return choice
 
 
-def _vault_folders(config: MetisConfig) -> list[str]:
-    """vault subfolders as sorted relative paths, excluding symlinks that escape the vault."""
-    vault = config.vault_path
-    if not vault.exists():
-        return []
-    vault_resolved = vault.resolve()
-    return sorted(
-        str(p.relative_to(vault))
-        for p in vault.rglob("*")
-        if p.is_dir()
-        and not p.name.startswith(".")
-        and p.resolve().is_relative_to(vault_resolved)
-    )
-
-
 def pick_folder(config: MetisConfig) -> str | None:
     """folder picker with type-to-filter. returns relative path or None if cancelled."""
-    folders = _vault_folders(config)
+    folders = vault_folders(config)
     if not folders:
         return None
 
@@ -99,7 +84,7 @@ def pick_suggested_folder(suggestions: list[tuple[str, float]], config: MetisCon
     ).ask()
 
     if choice is _PICK_EXISTING:
-        folders = _vault_folders(config)
+        folders = vault_folders(config)
         if not folders:
             return None
         return questionary.select(
