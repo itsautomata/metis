@@ -1,6 +1,7 @@
 """summarization, tagging, and chunking via OpenAI."""
 
 import json
+import re
 from dataclasses import dataclass
 
 from metis.client import get_client, get_chat_model
@@ -15,6 +16,15 @@ class ProcessedContent:
     chunks: list[str]
 
 
+def _strip_code_fence(text: str) -> str:
+    """strip a leading ```json/``` fence and trailing ``` that some models add around JSON."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+    return text.strip()
+
+
 def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], list[str]]:
     """summarize text and extract tags + key points.
 
@@ -22,7 +32,7 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
     """
     client = get_client(config)
 
-    # truncate to avoid token limits — first ~12k chars is enough for summarization
+    # truncate to avoid token limits: first ~12k chars is enough for summarization
     truncated = text[:12000]
 
     response = client.chat.completions.create(
@@ -44,12 +54,13 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
         response_format={"type": "json_object"},
     )
 
-    raw = response.choices[0].message.content.strip()
+    raw = _strip_code_fence(response.choices[0].message.content or "")
 
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        # LLM returned invalid JSON despite response_format — fallback to empty metadata
+        from rich.console import Console
+        Console().print("[yellow]! summary/tags skipped: the model did not return JSON[/yellow]")
         return "", [], []
 
     summary = _sanitize_summary(parsed.get("summary", ""), text)
