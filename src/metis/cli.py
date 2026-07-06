@@ -89,7 +89,7 @@ def ingest(
     if folder:
         resolved = (config.vault_path / folder).resolve()
         if not resolved.is_relative_to(config.vault_path.resolve()):
-            console.print(f"[red]folder must be inside the vault: {folder}[/red]")
+            console.print(f"[red]✗ folder must be inside the vault: {folder}[/red]")
             return
         config.output_folder = folder
 
@@ -103,7 +103,7 @@ def ingest(
         existing = check_duplicate(source)
         replace_path: Optional[Path] = None
         if existing:
-            console.print(f"[yellow]already ingested:[/yellow] {existing.name}")
+            console.print(f"[yellow]! already ingested:[/yellow] {existing.name}")
             if not typer.confirm("update?"):
                 continue
             from metis.index.sync import _remove_file_from_index
@@ -125,20 +125,20 @@ def ingest(
                     x_bearer_token=get_x_bearer(config.x_api.bearer_token),
                 )
         except NoTranscriptError:
-            console.print("[yellow]no transcript found.[/yellow]")
+            console.print("[yellow]! no transcript found.[/yellow]")
             save = typer.confirm("save link anyway?")
             if save:
                 file_path = write_link_only(source, config)
-                console.print(f"[bold green]link saved.[/bold green]")
+                console.print(f"[bold green]✓ link saved.[/bold green]")
                 console.print(f"  note: {file_path}")
             continue
         except (FileNotFoundError, ValueError) as e:
-            console.print(f"[red]{e}[/red]")
+            console.print(f"[red]✗ {e}[/red]")
             continue
 
         console.print(f"  title: {title}")
         console.print(f"  type:  {source_type}")
-        console.print(f"  chars: {len(text)}")
+        console.print(f"  chars: {len(text):,}")
 
         # 2. summarize + tag + chunk
         with console.status(f"processing with {config.provider}..."):
@@ -151,8 +151,8 @@ def ingest(
             with console.status("embedding and indexing..."):
                 embeddings = embed_texts(processed.chunks, config)
         except Exception as e:
-            console.print(f"[red]embedding failed: {e}[/red]")
-            console.print("[yellow]note was NOT saved. vault is unchanged.[/yellow]")
+            console.print(f"[red]✗ embedding failed: {e}[/red]")
+            console.print("[yellow]! note was NOT saved. vault is unchanged.[/yellow]")
             continue
 
         # 4. suggest folder if none specified (only for first source in batch, or each)
@@ -170,7 +170,7 @@ def ingest(
                         config.output_folder = chosen
                         record_feedback(source, top_folder, chosen)
                     else:
-                        console.print(f"[red]folder must be inside the vault: {chosen}. using default.[/red]")
+                        console.print(f"[red]✗ folder must be inside the vault: {chosen}. using default.[/red]")
 
         # 5. write to vault — only after embedding succeeds.
         if replace_path and replace_path.exists():
@@ -183,7 +183,7 @@ def ingest(
         n = store_chunks_with_embeddings(processed.chunks, embeddings, file_path, config)
         console.print(f"  indexed: {n} chunks")
 
-        console.print(f"[bold green]done.[/bold green] {file_path.name}")
+        console.print(f"[bold green]✓ done.[/bold green] {file_path.name}")
 
 
 @app.command()
@@ -201,7 +201,7 @@ def search(
         results = search_vault(query, config, limit=limit)
 
     if not results:
-        console.print("[yellow]no results. ingest some content first.[/yellow]")
+        console.print("[yellow]! no results. ingest some content first.[/yellow]")
         return
 
     # deduplicate by note (keep best chunk per file)
@@ -265,11 +265,11 @@ def chat(
         if not note_p.is_absolute():
             note_p = config.vault_path / note_p
         if not note_p.resolve().is_relative_to(config.vault_path.resolve()):
-            console.print(f"[red]note must be inside the vault: {note}[/red]")
+            console.print(f"[red]✗ note must be inside the vault: {note}[/red]")
             return
         note_path = str(note_p)
         if not note_p.exists():
-            console.print(f"[red]note not found: {note_path}[/red]")
+            console.print(f"[red]✗ note not found: {note_path}[/red]")
             return
 
     console.print(f"[bold]asking:[/bold] {question}\n")
@@ -293,7 +293,7 @@ def chat(
     if note_path:
         if save or typer.confirm("\nsave to note?"):
             save_qa_to_note(note_path, question, answer)
-            console.print("[bold green]Q&A saved.[/bold green]")
+            console.print("[bold green]✓ Q&A saved.[/bold green]")
 
     # offer external expansion — on low confidence or --expand flag
     if expand or confidence < LOW_CONFIDENCE_THRESHOLD:
@@ -306,9 +306,7 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
     from metis.chat import ask, save_qa_to_note
 
     console.print()
-    choice = input("expand via wikipedia? [y/N]: ").strip().lower()
-
-    if choice != "y":
+    if not typer.confirm("expand via wikipedia?"):
         return
 
     console.print("[dim]extracting search keywords...[/dim]")
@@ -321,15 +319,15 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
     except Exception as e:
         err = str(e)
         if "429" in err:
-            console.print("[yellow]rate limited — wait a minute and try again.[/yellow]")
+            console.print("[yellow]! rate limited — wait a minute and try again.[/yellow]")
         elif "timeout" in err.lower() or "ReadTimeout" in err:
-            console.print("[yellow]search timed out — try again later.[/yellow]")
+            console.print("[yellow]! search timed out — try again later.[/yellow]")
         else:
-            console.print(f"[red]search failed: {err}[/red]")
+            console.print(f"[red]✗ search failed: {err}[/red]")
         return
 
     if not results:
-        console.print("[yellow]no results found.[/yellow]")
+        console.print("[yellow]! no results found.[/yellow]")
         return
 
     # interactive picker for wikipedia results
@@ -365,7 +363,7 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
             note_name = Path(file_path).stem
             expanded_from = (best.source_type, note_name)
             save_qa_to_note(note_path, question, answer, expanded_from=expanded_from)
-            console.print("[bold green]Q&A saved.[/bold green]")
+            console.print("[bold green]✓ Q&A saved.[/bold green]")
 
 
 @app.command()
@@ -404,7 +402,7 @@ def link(
         connections = find_connections(config, note_path=note_path, min_score=min_score)
 
     if not connections:
-        console.print("[yellow]no connections found above threshold.[/yellow]")
+        console.print("[yellow]! no connections found above threshold.[/yellow]")
         return
 
     for c in connections:
@@ -422,7 +420,7 @@ def link(
 
     if write:
         n = write_links(connections)
-        console.print(f"[bold green]{n} wikilinks written.[/bold green]")
+        console.print(f"[bold green]✓ {n} wikilinks written.[/bold green]")
     else:
         console.print("[dim]use --write to add [[wikilinks]] to your notes.[/dim]")
 
@@ -442,7 +440,7 @@ def sync():
     console.print(f"  deleted:   {report.deleted} files")
     console.print(f"  unchanged: {report.unchanged} files")
     console.print()
-    console.print(f"[bold green]vault indexed.[/bold green] {report.total_files} files.")
+    console.print(f"[bold green]✓ vault indexed.[/bold green] {report.total_files} files.")
 
 
 @app.command()
@@ -454,7 +452,7 @@ def init():
     config.vault_path.mkdir(parents=True, exist_ok=True)
     config.chromadb_path.mkdir(parents=True, exist_ok=True)
 
-    console.print("[bold green]metis initialized.[/bold green]")
+    console.print("[bold green]✓ metis initialized.[/bold green]")
     console.print(f"  config: {config_path}")
     console.print(f"  vault:  {config.vault_path}")
     console.print(f"  db:     {config.chromadb_path}")
@@ -496,7 +494,7 @@ def config_cmd(
         return
 
     if key not in config_keys:
-        console.print(f"[red]unknown setting: {key}. options: {', '.join(config_keys.keys())}[/red]")
+        console.print(f"[red]✗ unknown setting: {key}. options: {', '.join(config_keys.keys())}[/red]")
         return
 
     # no value: show current
@@ -511,7 +509,7 @@ def config_cmd(
     with open(CONFIG_PATH, "w") as f:
         yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
 
-    console.print(f"[bold green]{key} set to: {value}[/bold green]")
+    console.print(f"[bold green]✓ {key} set to: {value}[/bold green]")
 
 
 @app.command()
@@ -561,7 +559,7 @@ def secret(
             return
 
     if name not in key_map:
-        console.print(f"[red]unknown key: {name}. options: {', '.join(key_map.keys())}[/red]")
+        console.print(f"[red]✗ unknown key: {name}. options: {', '.join(key_map.keys())}[/red]")
         return
 
     keychain_name = key_map[name]
@@ -570,17 +568,17 @@ def secret(
         import getpass
         value = getpass.getpass(f"enter {name}: ")
         if not value:
-            console.print("[yellow]empty value, nothing saved.[/yellow]")
+            console.print("[yellow]! empty value, nothing saved.[/yellow]")
             return
         set_secret(keychain_name, value)
-        console.print(f"[bold green]{name} saved to keychain.[/bold green]")
+        console.print(f"[bold green]✓ {name} saved to keychain.[/bold green]")
 
     elif action == "delete":
         delete_secret(keychain_name)
-        console.print(f"[bold green]{name} removed from keychain.[/bold green]")
+        console.print(f"[bold green]✓ {name} removed from keychain.[/bold green]")
 
     else:
-        console.print(f"[red]unknown action: {action}. use 'set', 'delete', or 'list'.[/red]")
+        console.print(f"[red]✗ unknown action: {action}. use 'set', 'delete', or 'list'.[/red]")
 
 
 @app.command()
@@ -600,7 +598,7 @@ def folders(
     vault_folders = _get_vault_folders(config)
 
     if not vault_folders:
-        console.print("[yellow]no folders in vault.[/yellow]")
+        console.print("[yellow]! no folders in vault.[/yellow]")
         return
 
     data = _load_categorization()
@@ -642,7 +640,7 @@ def folders(
         os.unlink(tmp_path)
 
         if not updated:
-            console.print("[yellow]no changes detected.[/yellow]")
+            console.print("[yellow]! no changes detected.[/yellow]")
             return
 
         # apply changes and re-embed updated folders
@@ -661,11 +659,11 @@ def folders(
         if changed:
             console.print(f"[dim]re-embedding {len(changed)} updated folders...[/dim]")
             get_folder_embeddings(config)
-            console.print(f"[bold green]{len(changed)} folder descriptions updated.[/bold green]")
+            console.print(f"[bold green]✓ {len(changed)} folder descriptions updated.[/bold green]")
             for f in changed:
                 console.print(f"  [magenta]{f}[/magenta]")
         else:
-            console.print("[yellow]no changes detected.[/yellow]")
+            console.print("[yellow]! no changes detected.[/yellow]")
 
     else:
         # list mode
@@ -699,7 +697,7 @@ def health(
     report = run_health(config)
 
     if report.n_notes < 2:
-        console.print("[yellow]not enough notes to analyze.[/yellow]")
+        console.print("[yellow]! not enough notes to analyze.[/yellow]")
         return
 
     # --- flag: --split <folder> ---
@@ -707,7 +705,7 @@ def health(
         from metis.health import analyze_split
         groups = analyze_split(split, config)
         if groups is None:
-            console.print(f"[yellow]{split}/ has too few notes to split (need 4+).[/yellow]")
+            console.print(f"[yellow]! {split}/ has too few notes to split (need 4+).[/yellow]")
             return
         console.print(f"[bold]{split}/[/bold] could split into:\n")
         for group in groups:
@@ -723,7 +721,7 @@ def health(
     # --- flag: --misplaced ---
     if misplaced:
         if not report.misplaced:
-            console.print("[green]no misplaced notes found. everything looks right.[/green]")
+            console.print("[green]✓ no misplaced notes found. everything looks right.[/green]")
             return
         console.print(f"[bold]{len(report.misplaced)} potentially misplaced notes:[/bold]\n")
         from collections import defaultdict as _dd
@@ -740,7 +738,7 @@ def health(
     # --- flag: --unique ---
     if unique:
         if not report.unique:
-            console.print("[green]no isolated notes found.[/green]")
+            console.print("[green]✓ no isolated notes found.[/green]")
             return
         console.print(f"[bold]{len(report.unique)} unique notes:[/bold]\n")
         for fp, folder in report.unique:

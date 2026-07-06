@@ -86,14 +86,14 @@ def pick_suggested_folder(suggestions: list[tuple[str, float]], config: MetisCon
     returns the chosen folder (relative path), or None if cancelled.
     """
     choices = [
-        questionary.Choice(title=f"{folder}  ({score:.2f})", value=folder)
-        for folder, score in suggestions
+        questionary.Choice(title=folder, value=folder)
+        for folder, _score in suggestions
     ]
     choices.append(questionary.Choice(title="pick an existing folder…", value=_PICK_EXISTING))
     choices.append(questionary.Choice(title="type a new folder name…", value=_NEW_FOLDER))
 
     choice = questionary.select(
-        "save to which folder?",
+        "folder:",
         choices=choices,
         style=STYLE,
     ).ask()
@@ -147,7 +147,7 @@ def pick_search_result(results: list, config: MetisConfig) -> str | None:
 def pick_secret(key_names: list[str]) -> str | None:
     """interactive secret key picker."""
     choice = questionary.select(
-        "which key?",
+        "key:",
         choices=key_names,
         style=STYLE,
     ).ask()
@@ -171,7 +171,7 @@ def pick_wikipedia(results: list[tuple[str, str]]) -> str | None:
     choices.append(questionary.Choice(title="skip", value=None))
 
     choice = questionary.select(
-        "ingest which article?",
+        "article:",
         choices=choices,
         style=STYLE,
     ).ask()
