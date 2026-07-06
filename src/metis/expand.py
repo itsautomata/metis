@@ -33,10 +33,12 @@ def extract_search_keywords(question: str, config: MetisConfig) -> str:
             {
                 "role": "system",
                 "content": (
-                    "extract 1-3 topic names from the user's question "
-                    "optimized for searching wikipedia articles. "
-                    "use the most specific encyclopedic topic name possible. "
-                    "return ONLY the topic names separated by spaces. no punctuation, no explanation."
+                    "extract wikipedia search topics from the user's question.\n\n"
+                    "name one to three topics whose wikipedia articles would answer the question, "
+                    "using the fewest that cover it. use the most specific encyclopedic title "
+                    "wikipedia would use, in its natural capitalization; proper nouns stay capitalized.\n\n"
+                    "output only the topic names as a plain search query, nothing else: no "
+                    "numbering, quotes, or explanation."
                 ),
             },
             {"role": "user", "content": question},
