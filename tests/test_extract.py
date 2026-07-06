@@ -1,20 +1,19 @@
 """tests for text extraction."""
 
+
 import pytest
-from pathlib import Path
 
 from metis.ingest.extract import (
-    is_url,
-    is_arxiv,
-    is_youtube,
-    is_xtweet,
-    is_pdf_url,
-    _youtube_video_id,
-    _arxiv_to_pdf_url,
     _arxiv_abs_url,
+    _arxiv_to_pdf_url,
+    _youtube_video_id,
     extract_from_markdown,
+    is_arxiv,
+    is_pdf_url,
+    is_url,
+    is_xtweet,
+    is_youtube,
 )
-
 
 # --- URL detection ---
 
