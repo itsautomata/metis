@@ -35,6 +35,7 @@ metis secret set x-token       # optional, for full x/twitter extraction
 metis secret set               # interactive, you pick which key you want to set
 metis secret list              # show which keys are set (no values)
 metis doctor                   # verify the whole setup: key, provider, models, index
+metis models                   # show the chat + embedding models (and provider) in use
 ```
 
 quick changes via `metis config vault <path>`. for everything else, edit `~/.metis/config.yaml`.
