@@ -46,7 +46,7 @@ def extract_search_keywords(question: str, config: MetisConfig) -> str:
         temperature=0.1,
     )
 
-    return response.choices[0].message.content.strip()
+    return (response.choices[0].message.content or "").strip()
 
 
 def search_wikipedia(query: str, max_results: int = 5) -> list[ExternalResult]:

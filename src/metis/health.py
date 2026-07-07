@@ -152,7 +152,7 @@ def run_health(config: MetisConfig) -> HealthReport:
 
     # --- DBSCAN for topic detection ---
     flat_distances = distance_matrix[np.triu_indices(len(distance_matrix), k=1)]
-    eps = float(np.percentile(flat_distances, 25))
+    eps = max(float(np.percentile(flat_distances, 25)), 1e-6)
     db = DBSCAN(eps=eps, min_samples=2, metric="precomputed")
     labels = db.fit_predict(distance_matrix)
 

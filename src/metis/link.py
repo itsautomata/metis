@@ -161,7 +161,7 @@ def explain_connection(connection: Connection, config: MetisConfig) -> str:
         temperature=0.3,
     )
 
-    return response.choices[0].message.content.strip()
+    return (response.choices[0].message.content or "").strip()
 
 
 def write_links(connections: list[Connection]) -> int:

@@ -119,7 +119,7 @@ def ask(
             temperature=0.3,
         )
 
-        answer = response.choices[0].message.content.strip()
+        answer = (response.choices[0].message.content or "").strip()
         break
 
     return answer, all_sources, confidence
@@ -161,18 +161,17 @@ def save_qa_to_note(
             insert_pos = match.start()
             break
 
-    if "## Q&A" in text:
+    qa_match = re.search(r"## Q&A\r?\n", text)
+    if qa_match:
         # append to existing Q&A section
-        qa_match = re.search(r"(## Q&A\n)", text)
-        if qa_match:
-            insert_after = qa_match.end()
-            # find the end of existing Q&A content (next ## heading or the insert_pos)
-            next_heading = re.search(r"\n## (?!Q&A)", text[insert_after:])
-            if next_heading:
-                qa_end = insert_after + next_heading.start()
-            else:
-                qa_end = len(text)
-            text = text[:qa_end] + entry + text[qa_end:]
+        insert_after = qa_match.end()
+        # find the end of existing Q&A content (next ## heading or the insert_pos)
+        next_heading = re.search(r"\n## (?!Q&A)", text[insert_after:])
+        if next_heading:
+            qa_end = insert_after + next_heading.start()
+        else:
+            qa_end = len(text)
+        text = text[:qa_end] + entry + text[qa_end:]
     elif insert_pos is not None:
         # create new Q&A section before Transcript/Content
         qa_section = f"\n## Q&A\n{entry}"

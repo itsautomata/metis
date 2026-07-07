@@ -591,16 +591,25 @@ def config_cmd(
     console.print(f"[bold green]✓ {key} set to: {value}[/bold green]")
 
 
+def _keychain_key() -> str:
+    """the provider key from the keychain, or "" when the keyring backend is unavailable."""
+    import keyring
+
+    from metis.secrets import PROVIDER_KEY, SERVICE
+    try:
+        return keyring.get_password(SERVICE, PROVIDER_KEY) or ""
+    except Exception:
+        return ""
+
+
 @app.command()
 def models():
     """show the chat and embedding models in use, the resolved key, and whether the index matches."""
     import os
 
-    import keyring
-
     from metis.client import get_chat_model, get_embedding_model, provider_of
     from metis.index.store import get_collection, indexed_embedding_model
-    from metis.secrets import PROVIDER_KEY, SERVICE, get_provider_key
+    from metis.secrets import get_provider_key
 
     config = load_config()
     chat_endpoint = config.openai.base_url or "openai (default)"
@@ -631,7 +640,7 @@ def models():
     # key: source + provider guess + conflict/mismatch warnings (never prints the key)
     console.print()
     console.print("[bold]key[/bold]")
-    kc = keyring.get_password(SERVICE, PROVIDER_KEY) or ""
+    kc = _keychain_key()
     env = os.environ.get("METIS_PROVIDER_KEY", "") or ""
     resolved_key = get_provider_key()
     if not resolved_key:
@@ -652,11 +661,9 @@ def doctor():
     """validate the setup offline and print a ✓/✗ checklist. exits non-zero if anything is off."""
     import os
 
-    import keyring
-
     from metis.client import get_chat_model, get_embedding_model, provider_of
     from metis.index.store import get_collection, indexed_embedding_model
-    from metis.secrets import PROVIDER_KEY, SERVICE, get_provider_key
+    from metis.secrets import get_provider_key
 
     config = load_config()
     ok = True
@@ -672,7 +679,7 @@ def doctor():
 
     base_prov = provider_of(config.openai.base_url)
     resolved_key = get_provider_key()
-    source = "keychain" if keyring.get_password(SERVICE, PROVIDER_KEY) else "env" if os.environ.get("METIS_PROVIDER_KEY") else "none"
+    source = "keychain" if _keychain_key() else "env" if os.environ.get("METIS_PROVIDER_KEY") else "none"
     key_prov = _key_provider(resolved_key)
     if not resolved_key:
         check(False, "key", "not set", "run 'metis secret set provider-key'")
