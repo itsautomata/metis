@@ -1,6 +1,6 @@
 """tests for chat Q&A saving."""
 
-from metis.chat import format_qa_entry, save_qa_to_note
+from metis.chat import _simplify_query, format_qa_entry, save_qa_to_note
 
 
 def test_format_qa_entry():
@@ -100,8 +100,6 @@ def test_save_qa_empty_answer(tmp_path):
 
 # --- query simplification ---
 
-from metis.chat import _simplify_query
-
 
 def test_simplify_query_strips_stop_words():
     result = _simplify_query("what does he say about nash equilibrium?")
@@ -133,3 +131,28 @@ def test_simplify_query_all_stop_words():
     result = _simplify_query("what is the a an")
     # falls back to original since no keywords remain
     assert result == "what is the a an"
+
+
+def test_save_qa_inline_mention_still_saves(tmp_path):
+    """a note that mentions '## Q&A' inline (not as a heading) still gets the answer, not a silent drop."""
+    note = tmp_path / "test.md"
+    note.write_text(
+        "# Title\n\nthis note explains the ## Q&A convention inline.\n\n"
+        "## Content\n\nthe article text"
+    )
+
+    save_qa_to_note(str(note), "real question?", "real answer.")
+
+    text = note.read_text()
+    assert "**real question?**" in text
+    assert "real answer." in text
+
+
+def test_save_qa_crlf_heading_still_saves(tmp_path):
+    """a CRLF-terminated Q&A heading (Obsidian-on-Windows) still gets the answer appended."""
+    note = tmp_path / "test.md"
+    note.write_text("# Title\r\n\r\n## Q&A\r\n\r\n**old?** *(metis)* old answer.\r\n\r\n## Transcript\r\n\r\ntext")
+
+    save_qa_to_note(str(note), "new question?", "new answer.")
+
+    assert "new question?" in note.read_text()

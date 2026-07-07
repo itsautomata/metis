@@ -61,3 +61,18 @@ def test_models_flags_wrong_provider_key(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert "likely the wrong key" in result.output
+
+
+def test_models_survives_keyring_error(monkeypatch, tmp_path):
+    """a keyring backend error (e.g. macOS -25320) must not crash metis models."""
+    monkeypatch.setattr("metis.cli.load_config", lambda: MetisConfig(chromadb_path=tmp_path / "cdb"))
+
+    def _boom(service, name):
+        raise Exception("Can't get password from keychain: (-25320, 'Unknown Error')")
+
+    monkeypatch.setattr("keyring.get_password", _boom)
+
+    result = runner.invoke(app, ["models"])
+
+    assert result.exit_code == 0
+    assert "Traceback" not in result.output

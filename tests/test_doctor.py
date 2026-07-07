@@ -63,3 +63,17 @@ def test_doctor_flags_index_mismatch(monkeypatch, tmp_path):
 
     assert result.exit_code == 1
     assert "reindex" in result.output
+
+
+def test_doctor_survives_keyring_error(monkeypatch, tmp_path):
+    """a keyring backend error must not crash metis doctor (the setup-diagnostic command)."""
+    monkeypatch.setattr("metis.cli.load_config", lambda: MetisConfig(chromadb_path=tmp_path / "cdb"))
+
+    def _boom(service, name):
+        raise Exception("keychain locked")
+
+    monkeypatch.setattr("keyring.get_password", _boom)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert "Traceback" not in result.output
