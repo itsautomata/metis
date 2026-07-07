@@ -145,17 +145,6 @@ def ingest(
         if len(sources) > 1:
             console.print(f"\n[bold]({i+1}/{len(sources)})[/bold]")
 
-        # check for duplicate
-        existing = check_duplicate(source)
-        replace_path: Optional[Path] = None
-        if existing:
-            console.print(f"[yellow]! already ingested:[/yellow] {existing.name}")
-            if not typer.confirm("update?"):
-                continue
-            from metis.index.sync import _remove_file_from_index
-            _remove_file_from_index(str(existing), config)
-            replace_path = existing
-
         console.print(f"[bold]ingesting:[/bold] {source}")
 
         # 1. extract
@@ -185,6 +174,17 @@ def ingest(
         console.print(f"  title: {title}")
         console.print(f"  type:  {source_type}")
         console.print(f"  chars: {len(text):,}")
+
+        # check for duplicate, keyed on the canonical source_link that write_to_vault registers
+        existing = check_duplicate(source_link)
+        replace_path: Optional[Path] = None
+        if existing:
+            console.print(f"[yellow]! already ingested:[/yellow] {existing.name}")
+            if not typer.confirm("update?"):
+                continue
+            from metis.index.sync import _remove_file_from_index
+            _remove_file_from_index(str(existing), config)
+            replace_path = existing
 
         # 2. summarize + tag + chunk
         with console.status(f"processing with {config.openai.chat_model}..."):

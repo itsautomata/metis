@@ -67,3 +67,26 @@ def test_failed_extract_preserves_existing_note(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert existing.exists(), "existing note was destroyed by a failed update"
     assert "original content worth keeping" in existing.read_text()
+
+
+def test_dedup_keys_on_canonical_source_link(tmp_path, monkeypatch):
+    """the duplicate check must use extract()'s canonical source_link, not the raw input."""
+    config, existing = _make_config(tmp_path)
+    monkeypatch.setattr("metis.cli.load_config", lambda: config)
+
+    seen = {}
+
+    def _record(src):
+        seen["arg"] = src
+        return existing  # a duplicate; decline the update below to stop right here
+
+    monkeypatch.setattr("metis.ingest.write.check_duplicate", _record)
+    monkeypatch.setattr(
+        "metis.ingest.extract.extract",
+        lambda *a, **k: ("t", "text", "file", "file:///abs/notes.md", None),
+    )
+
+    result = runner.invoke(app, ["ingest", "notes.md"], input="n\n")
+
+    assert result.exit_code == 0
+    assert seen["arg"] == "file:///abs/notes.md", "dedup used the raw input, not the canonical source_link"
