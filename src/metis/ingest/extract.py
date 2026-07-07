@@ -1,11 +1,45 @@
 """text extraction from different source types."""
 
+import ipaddress
 import re
+import socket
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 import fitz
 import httpx
 import trafilatura
+
+
+def _reject_ssrf(url: str) -> None:
+    """raise ValueError unless url is http(s) and resolves only to public addresses."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"refusing non-http(s) url: {url}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError(f"url has no host: {url}")
+    try:
+        addrs = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        raise ValueError(f"could not resolve host: {host}") from e
+    for *_, sockaddr in addrs:
+        ip = ipaddress.ip_address(sockaddr[0].split("%")[0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise ValueError(f"refusing url pointing at a non-public address: {host} ({ip})")
+
+
+def _safe_get(url: str, **kwargs) -> httpx.Response:
+    """httpx.get that validates the target and every redirect hop against ssrf."""
+    kwargs.pop("follow_redirects", None)
+    for _ in range(6):
+        _reject_ssrf(url)
+        response = httpx.get(url, follow_redirects=False, **kwargs)
+        if response.is_redirect and response.headers.get("location"):
+            url = urljoin(url, response.headers["location"])
+            continue
+        return response
+    raise ValueError(f"too many redirects: {url}")
 
 
 def is_url(source: str) -> bool:
@@ -264,7 +298,7 @@ def extract_from_pdf_url(url: str) -> tuple[str, str]:
     """download PDF from URL, extract text, delete temp file. returns (title, text)."""
     import tempfile
 
-    response = httpx.get(url, follow_redirects=True, timeout=60)
+    response = _safe_get(url, timeout=60)
     response.raise_for_status()
 
     # verify we actually got a PDF, not an HTML redirect
@@ -319,7 +353,7 @@ def extract_from_arxiv(url: str) -> tuple[str, str]:
     pdf_url = _arxiv_to_pdf_url(url)
 
     # download the PDF
-    response = httpx.get(pdf_url, follow_redirects=True, timeout=60)
+    response = _safe_get(pdf_url, timeout=60)
     response.raise_for_status()
 
     # write to temp file and extract with pymupdf
@@ -443,8 +477,7 @@ def _extract_with_httpx(url: str) -> tuple[str, str] | None:
     returns (title, text) or None.
     """
     try:
-        response = httpx.get(url, follow_redirects=True, timeout=30,
-                           headers={"User-Agent": "metis/0.1.0"})
+        response = _safe_get(url, timeout=30, headers={"User-Agent": "metis/0.1.0"})
         response.raise_for_status()
     except Exception:
         return None
@@ -466,8 +499,7 @@ def _extract_with_browser(url: str) -> tuple[str, str] | None:
     the bot-blocked case, where a site 403s non-browser agents.
     """
     try:
-        response = httpx.get(url, follow_redirects=True, timeout=30,
-                           headers={"User-Agent": BROWSER_UA})
+        response = _safe_get(url, timeout=30, headers={"User-Agent": BROWSER_UA})
         response.raise_for_status()
     except Exception:
         return None
@@ -493,8 +525,11 @@ def extract_from_url(url: str) -> tuple[str, str]:
     fallback chain: trafilatura → distill.js extractor → httpx + tag stripping
     → browser-UA fetch for sites that block non-browser agents.
     """
-    # 1. trafilatura (best for standard articles)
-    downloaded = trafilatura.fetch_url(url)
+    # 1. trafilatura (best for standard articles), fetched through the ssrf guard
+    try:
+        downloaded = _safe_get(url, timeout=30, headers={"User-Agent": BROWSER_UA}).text
+    except Exception:
+        downloaded = None
     if downloaded:
         text = trafilatura.extract(downloaded, include_comments=False, include_tables=True)
         if text:
