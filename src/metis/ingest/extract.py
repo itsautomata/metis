@@ -462,8 +462,12 @@ def _strip_html_body(html: str, url: str) -> tuple[str, str] | None:
     for tag in ["script", "style", "nav", "header", "footer", "aside"]:
         html = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", "", html, flags=re.DOTALL)
 
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"<(p|h[1-6]|li|dt|dd|figcaption)[^>]*>", "\n", html)
+    text = re.sub(r"</(p|h[1-6]|li|dt|dd|figcaption)>", "\n", text)
+    text = re.sub(r"<br\s*/?>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n[ \t]*(\n[ \t]*)+", "\n\n", text).strip()
 
     if len(text) < 50:
         return None
@@ -506,7 +510,7 @@ def _extract_with_browser(url: str) -> tuple[str, str] | None:
 
     html = response.text
 
-    text = trafilatura.extract(html, include_comments=False, include_tables=True)
+    text = trafilatura.extract(html, output_format="markdown", include_links=True, include_comments=False, include_tables=True)
     if text:
         metadata = trafilatura.extract_metadata(html)
         title = metadata.title if metadata and metadata.title else _title_from_url(url)
@@ -531,7 +535,7 @@ def extract_from_url(url: str) -> tuple[str, str]:
     except Exception:
         downloaded = None
     if downloaded:
-        text = trafilatura.extract(downloaded, include_comments=False, include_tables=True)
+        text = trafilatura.extract(downloaded, output_format="markdown", include_links=True, include_comments=False, include_tables=True)
         if text:
             metadata = trafilatura.extract_metadata(downloaded)
             title = metadata.title if metadata and metadata.title else _title_from_url(url)

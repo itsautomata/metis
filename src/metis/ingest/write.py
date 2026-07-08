@@ -53,6 +53,23 @@ def slugify(title: str) -> str:
     return slug.strip("-")[:80]
 
 
+def _demote_headings(md: str, by: int = 2) -> str:
+    """shift markdown ATX headings down `by` levels (capped at h6) so a body nests under the note's sections.
+
+    fenced code blocks are skipped so a `#` comment line inside them is not mistaken for a heading.
+    """
+    out, in_fence = [], False
+    for line in md.split("\n"):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+        elif not in_fence:
+            m = re.match(r"(#{1,6})(\s)", line)
+            if m:
+                line = "#" * min(len(m.group(1)) + by, 6) + line[m.end(1):]
+        out.append(line)
+    return "\n".join(out)
+
+
 def build_markdown(
     title: str,
     text: str,
@@ -96,7 +113,7 @@ def build_markdown(
         f"\n"
         f"## {content_label}\n"
         f"\n"
-        f"{text}"
+        f"{_demote_headings(text)}"
     )
 
     return f"{frontmatter}\n\n{body}\n"
