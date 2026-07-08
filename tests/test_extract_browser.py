@@ -21,6 +21,7 @@ def test_browser_fetch_recovers_after_metis_ua_403(monkeypatch):
             return _fake_response(200, article)
         return _fake_response(403, "blocked")
 
+    monkeypatch.setattr("socket.getaddrinfo", lambda host, port=None, *a, **k: [(2, 1, 6, "", ("93.184.216.34", 0))])
     monkeypatch.setattr(ex.trafilatura, "fetch_url", lambda url: None)
     monkeypatch.setattr(ex.httpx, "get", fake_get)
 
@@ -36,6 +37,7 @@ def test_browser_fetch_uses_browser_user_agent(monkeypatch):
         seen["ua"] = kwargs.get("headers", {}).get("User-Agent", "")
         return _fake_response(200, "<html><body>" + ("word " * 50) + "</body></html>")
 
+    monkeypatch.setattr("socket.getaddrinfo", lambda host, port=None, *a, **k: [(2, 1, 6, "", ("93.184.216.34", 0))])
     monkeypatch.setattr(ex.httpx, "get", fake_get)
     result = ex._extract_with_browser("https://blocked.example")
     assert seen["ua"] == ex.BROWSER_UA
