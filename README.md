@@ -1,6 +1,10 @@
-# metis
 
-cli second brain that pairs with obsidian.
+<p align="center">
+  <img src="assets/metis_sc_draft.gif" alt="metis" width="330">
+</p>
+
+## metis
+a cli second brain that pairs with obsidian.
 
 ingest anything. search by meaning. chat with your knowledge. discover connections.
 
