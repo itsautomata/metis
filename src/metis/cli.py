@@ -298,7 +298,10 @@ def _chat_repl(config, note_path: Optional[str], save: bool) -> None:
     from metis.pick import STYLE
 
     scope = Path(note_path).name if note_path else "the vault"
-    console.print(f"[dim]chatting with {scope}. ask a question, or press enter for the menu (save / exit).[/dim]\n")
+    console.print(
+        f"[dim]chatting with {scope}. ask anything. "
+        "/save keeps the last answer, /exit quits, /menu for options.[/dim]\n"
+    )
 
     history: list[dict] = []
     last: tuple[str, str] | None = None
@@ -344,7 +347,7 @@ def _chat_repl(config, note_path: Optional[str], save: bool) -> None:
         if q == "/save":
             _save_last()
             continue
-        if q == "" or q in ("/menu", "/"):
+        if q == "" or q == "/menu":
             action = _menu()
             if action == "exit":
                 break
