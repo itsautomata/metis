@@ -47,9 +47,11 @@ def ask(
     question: str,
     config: MetisConfig,
     note_path: str | None = None,
+    history: list[dict] | None = None,
 ) -> tuple[str, list[str], float]:
     """ask a question against the vault (or a specific note).
 
+    history is prior {role, content} turns for a multi-turn conversation.
     returns (answer, sources, avg_confidence)
     """
     client = get_client(config)
@@ -105,6 +107,7 @@ def ask(
 
         messages = [
             {"role": "system", "content": system_prompt},
+            *(history or []),
             {"role": "user", "content": question},
             {"role": "user", "content": (
                 f"---CONTEXT START---\n{context}\n---CONTEXT END---\n"

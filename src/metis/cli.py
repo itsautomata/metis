@@ -288,10 +288,98 @@ def search(
                 console.print(f"  [dim]- {Path(s).name}[/dim]")
 
 
+def _chat_repl(config, note_path: Optional[str], save: bool) -> None:
+    """interactive multi-turn chat loop over the vault; each turn remembers the prior ones."""
+    import questionary
+    from questionary import Choice
+
+    from metis.chat import ask, save_qa_to_note
+    from metis.client import ProviderError
+    from metis.pick import STYLE
+
+    scope = Path(note_path).name if note_path else "the vault"
+    console.print(f"[dim]chatting with {scope}. ask a question, or press enter for the menu (save / exit).[/dim]\n")
+
+    history: list[dict] = []
+    last: tuple[str, str] | None = None
+
+    def _save_last() -> None:
+        if not last:
+            console.print("[yellow]nothing to save yet.[/yellow]\n")
+            return
+        target = note_path
+        if not target:
+            name = questionary.text("save to which note?", style=STYLE).ask()
+            if not name or not name.strip():
+                return
+            path = (config.vault_path / Path(name.strip()).with_suffix(".md")).resolve()
+            if not path.is_relative_to(config.vault_path.resolve()):
+                console.print("[red]✗ note must be inside the vault.[/red]\n")
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                path.write_text(f"# {name.strip()}\n", encoding="utf-8")
+            target = str(path)
+        save_qa_to_note(target, last[0], last[1])
+        console.print("[green]✓ saved.[/green]\n")
+
+    def _menu() -> Optional[str]:
+        return questionary.select(
+            "menu:",
+            choices=[
+                Choice("keep chatting", "chat"),
+                Choice("save the last answer", "save"),
+                Choice("exit", "exit"),
+            ],
+            style=STYLE,
+        ).ask()
+
+    while True:
+        q = questionary.text("you:", style=STYLE).ask()
+        if q is None:
+            break
+        q = q.strip()
+        if q in ("/exit", "/quit", "/q"):
+            break
+        if q == "/save":
+            _save_last()
+            continue
+        if q == "" or q in ("/menu", "/"):
+            action = _menu()
+            if action == "exit":
+                break
+            if action == "save":
+                _save_last()
+            continue  # keep chatting -- also ctrl-c / cancel, which returns None
+
+        try:
+            with console.status("thinking..."):
+                answer, sources, _ = ask(q, config, note_path=note_path, history=history)
+        except ProviderError as e:
+            console.print(f"[red]✗ {e}[/red]\n")
+            continue
+        except Exception as e:
+            console.print(f"[red]✗ chat turn failed: {e}[/red]\n")
+            continue
+
+        console.print(f"\n[magenta]metis[/magenta] {answer}\n")
+        if sources:
+            console.print(f"[dim]sources: {', '.join(Path(s).name for s in sources)}[/dim]\n")
+
+        history.append({"role": "user", "content": q})
+        history.append({"role": "assistant", "content": answer})
+        history = history[-10:]
+        last = (q, answer)
+        if note_path and save:
+            save_qa_to_note(note_path, q, answer)
+
+    console.print("[dim]bye.[/dim]")
+
+
 @app.command()
 @_provider_guard
 def chat(
-    question: str = typer.Argument(help="question to ask your vault"),
+    question: Optional[str] = typer.Argument(None, help="question to ask your vault (omit for an interactive chat loop)"),
     note: Optional[str] = typer.Option(None, "--note", help="scope to a specific note", autocompletion=_complete_vault_notes),
     pick: bool = typer.Option(False, "--pick", "-p", help="interactively pick a note"),
     save: bool = typer.Option(False, "--save", "-s", help="save Q&A to the note"),
@@ -325,6 +413,10 @@ def chat(
         if not note_p.exists():
             console.print(f"[red]✗ note not found: {note_path}[/red]")
             return
+
+    if question is None:
+        _chat_repl(config, note_path, save)
+        return
 
     console.print(f"[bold]asking:[/bold] {question}\n")
 
