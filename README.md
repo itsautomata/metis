@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="assets/metis_sc_draft.gif" alt="metis" width="330">
+  <img src="assets/metis_draft.gif" alt="metis" width="330">
 </p>
 
 ## metis
