@@ -17,6 +17,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from metis.config import CONFIG_DIR, MetisConfig, vault_folders
 from metis.index.embed import embed_texts
 from metis.index.store import get_collection
+from metis.textio import read_note_text
 
 CATEGORIZATION_PATH = CONFIG_DIR / "categorization.json"
 
@@ -59,7 +60,7 @@ def _auto_describe_folder(folder: str, config: MetisConfig) -> str:
     summaries = []
 
     for md in sorted(folder_path.glob("*.md"))[:10]:
-        text = md.read_text(encoding="utf-8")
+        text = read_note_text(md)
         if not text.startswith("---"):
             continue
 

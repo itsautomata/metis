@@ -4,9 +4,10 @@ import re
 from datetime import date
 from pathlib import Path
 
-from metis.client import get_client, get_chat_model
+from metis.client import get_chat_model, get_client
 from metis.config import MetisConfig
-from metis.search import search_vault, SearchResult
+from metis.search import SearchResult, search_vault
+from metis.textio import read_note_text
 
 MAX_ROUNDS = 3
 LOW_CONFIDENCE_THRESHOLD = 0.7
@@ -151,7 +152,7 @@ def save_qa_to_note(
 ) -> None:
     """insert Q&A into the note, before the Transcript/Content section."""
     path = Path(note_path)
-    text = path.read_text(encoding="utf-8")
+    text = read_note_text(path)
     entry = format_qa_entry(question, answer, expanded_from=expanded_from)
 
     # find where to insert — before ## Transcript or ## Content

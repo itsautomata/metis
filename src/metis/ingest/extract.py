@@ -10,6 +10,8 @@ import fitz
 import httpx
 import trafilatura
 
+from metis.textio import read_note_text
+
 
 def _reject_ssrf(url: str) -> None:
     """raise ValueError unless url is http(s) and resolves only to public addresses."""
@@ -556,7 +558,7 @@ def extract_from_url(url: str) -> tuple[str, str]:
 
 def extract_from_markdown(path: Path) -> tuple[str, str]:
     """read markdown file. returns (title, text)."""
-    text = path.read_text(encoding="utf-8")
+    text = read_note_text(path)
 
     title_match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
     title = title_match.group(1) if title_match else path.stem.replace("-", " ").replace("_", " ")

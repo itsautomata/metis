@@ -1,17 +1,17 @@
 """vault health analysis using DBSCAN clustering and KNN misplacement detection."""
 
-import yaml
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import yaml
 from sklearn.cluster import DBSCAN
 from sklearn.metrics.pairwise import cosine_distances
 
 from metis.config import MetisConfig
 from metis.index.store import get_collection
-
+from metis.textio import read_note_text
 
 # --- data extraction ---
 
@@ -66,7 +66,7 @@ def _label_cluster(file_paths: list[str]) -> str:
         path = Path(fp)
         if not path.exists():
             continue
-        text = path.read_text(encoding="utf-8")
+        text = read_note_text(path)
         if not text.startswith("---"):
             continue
         parts = text.split("---", 2)

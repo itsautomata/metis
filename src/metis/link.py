@@ -4,10 +4,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from metis.client import get_client, get_chat_model
+from metis.client import get_chat_model, get_client
 from metis.config import MetisConfig
 from metis.index.embed import embed_texts
 from metis.index.store import get_collection
+from metis.textio import read_note_text
 
 
 @dataclass
@@ -23,7 +24,7 @@ def _get_existing_links(file_path: Path) -> set[str]:
     """find all [[wikilinks]] already in a file."""
     if not file_path.exists():
         return set()
-    text = file_path.read_text(encoding="utf-8")
+    text = read_note_text(file_path)
     return set(re.findall(r"\[\[(.+?)\]\]", text))
 
 
@@ -178,7 +179,7 @@ def write_links(connections: list[Connection]) -> int:
         if not path.exists():
             continue
 
-        text = path.read_text(encoding="utf-8")
+        text = read_note_text(path)
 
         links_section = "\n\n## Connections\n\n"
         for c in conns:
