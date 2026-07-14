@@ -123,6 +123,7 @@ def ingest(
     from metis.ingest.write import write_to_vault, write_link_only, check_duplicate
     from metis.index.embed import embed_texts
     from metis.index.store import store_chunks_with_embeddings
+    from metis.index.sync import mark_file_synced
 
     config = load_config()
     if not _ensure_index_model(config):
@@ -230,6 +231,9 @@ def ingest(
         # 6. store vectors with pre-computed embeddings
         n = store_chunks_with_embeddings(processed.chunks, embeddings, file_path, config)
         console.print(f"  indexed: {n} chunks")
+
+        # record the note in sync state so a later `metis sync` won't re-embed it
+        mark_file_synced(file_path)
 
         console.print(f"[bold green]✓ done.[/bold green] {file_path.name}")
 

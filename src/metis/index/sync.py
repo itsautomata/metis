@@ -44,6 +44,18 @@ def _save_sync_state(state: dict[str, str]) -> None:
     SYNC_STATE_PATH.write_text(json.dumps(state, indent=2))
 
 
+def mark_file_synced(file_path: Path) -> None:
+    """record a file's current content hash in the sync state.
+
+    ingest calls this after storing a note so a later `metis sync` treats it as
+    already indexed instead of re-embedding it. an edit in obsidian changes the
+    hash, so sync still re-embeds edited notes.
+    """
+    state = _load_sync_state()
+    state[str(file_path)] = _file_hash(file_path)
+    _save_sync_state(state)
+
+
 def _find_vault_files(config: MetisConfig) -> list[Path]:
     """find all markdown files in the vault."""
     return sorted(config.vault_path.rglob("*.md"))
