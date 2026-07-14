@@ -581,6 +581,15 @@ def link(
 @_provider_guard
 def sync():
     """re-index vault to catch manual edits."""
+    from rich.progress import (
+        BarColumn,
+        MofNCompleteColumn,
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        TimeElapsedColumn,
+    )
+
     from metis.index.sync import sync_vault
 
     config = load_config()
@@ -588,7 +597,26 @@ def sync():
         return
     console.print(f"[bold]syncing:[/bold] {config.vault_path}\n")
 
-    report = sync_vault(config)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("scanning...", total=None)
+
+        def _on_progress(done: int, total: int, name: str) -> None:
+            progress.update(
+                task,
+                total=total,
+                completed=done,
+                description=f"[dim]{name[:44]}[/dim]" if name else "[dim]finishing...[/dim]",
+            )
+
+        report = sync_vault(config, on_progress=_on_progress)
 
     console.print(f"  added:     {report.added} files")
     console.print(f"  updated:   {report.updated} files")

@@ -2,14 +2,16 @@
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import chromadb
 
-from metis.config import MetisConfig, CONFIG_DIR
+from metis.config import CONFIG_DIR, MetisConfig
+from metis.index.store import get_collection, store_chunks
 from metis.ingest.process import chunk_text
-from metis.index.store import store_chunks, get_collection
+from metis.textio import read_note_text
 
 SYNC_STATE_PATH = CONFIG_DIR / "sync_state.json"
 
@@ -62,16 +64,26 @@ def _remove_file_from_index(file_path: str, config: MetisConfig) -> int:
     return 0
 
 
-def sync_vault(config: MetisConfig) -> SyncReport:
-    """sync the vault with chromadb. returns a report of what changed."""
+def sync_vault(
+    config: MetisConfig,
+    on_progress: Callable[[int, int, str], None] | None = None,
+) -> SyncReport:
+    """sync the vault with chromadb. returns a report of what changed.
+
+    on_progress, if given, is called as on_progress(done, total, filename) as each
+    file is processed, so a caller can render progress.
+    """
     report = SyncReport()
     old_state = _load_sync_state()
     new_state = {}
 
     vault_files = _find_vault_files(config)
+    total = len(vault_files)
     current_paths = set()
 
-    for path in vault_files:
+    for i, path in enumerate(vault_files):
+        if on_progress:
+            on_progress(i, total, path.name)
         file_key = str(path)
         current_paths.add(file_key)
         current_hash = _file_hash(path)
@@ -79,7 +91,7 @@ def sync_vault(config: MetisConfig) -> SyncReport:
 
         if file_key not in old_state:
             # new file
-            text = path.read_text(encoding="utf-8")
+            text = read_note_text(path)
             chunks = chunk_text(text)
             n = store_chunks(chunks, path, config)
             report.added += 1
@@ -88,7 +100,7 @@ def sync_vault(config: MetisConfig) -> SyncReport:
         elif old_state[file_key] != current_hash:
             # changed file — remove old chunks, add new
             _remove_file_from_index(file_key, config)
-            text = path.read_text(encoding="utf-8")
+            text = read_note_text(path)
             chunks = chunk_text(text)
             n = store_chunks(chunks, path, config)
             report.updated += 1
@@ -97,6 +109,9 @@ def sync_vault(config: MetisConfig) -> SyncReport:
         else:
             # unchanged
             report.unchanged += 1
+
+    if on_progress:
+        on_progress(total, total, "")
 
     # deleted files — in old state but not in current vault
     for old_path in old_state:
