@@ -303,10 +303,10 @@ def extract_from_pdf_url(url: str) -> tuple[str, str]:
     response = _safe_get(url, timeout=60)
     response.raise_for_status()
 
-    # verify we actually got a PDF, not an HTML redirect
+    # verify we actually got a PDF, not an HTML redirect or error page
     content_type = response.headers.get("content-type", "")
-    if "pdf" not in content_type and not response.content[:5] == b"%PDF-":
-        raise ValueError(f"URL does not serve a PDF (got {content_type}): {url}")
+    if response.content[:16].lstrip()[:5] != b"%PDF-":
+        raise ValueError(f"URL does not serve a PDF (content-type {content_type}): {url}")
 
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(response.content)
