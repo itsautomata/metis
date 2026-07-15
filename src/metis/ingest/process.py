@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 
-from metis.client import get_client, get_chat_model
+from metis.client import get_chat_model, get_client
 from metis.config import MetisConfig
 
 
@@ -66,13 +66,22 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
         response_format={"type": "json_object"},
     )
 
+    from rich.console import Console
+
+    if not response.choices:
+        Console().print("[yellow]! summary/tags skipped: the model returned no choices[/yellow]")
+        return "", [], []
+
     raw = _strip_code_fence(response.choices[0].message.content or "")
 
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        from rich.console import Console
         Console().print("[yellow]! summary/tags skipped: the model did not return JSON[/yellow]")
+        return "", [], []
+
+    if not isinstance(parsed, dict):
+        Console().print("[yellow]! summary/tags skipped: the model did not return a JSON object[/yellow]")
         return "", [], []
 
     summary = _sanitize_summary(parsed.get("summary", ""), text)
@@ -84,6 +93,8 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
 
 def _sanitize_tags(tags: list) -> list[str]:
     """validate and clean LLM-generated tags."""
+    if not isinstance(tags, list):
+        return []
     clean = []
     for tag in tags:
         if not isinstance(tag, str):
@@ -108,6 +119,8 @@ def _sanitize_summary(summary: str, original_text: str) -> str:
 
 def _sanitize_key_points(points: list) -> list[str]:
     """validate LLM-generated key points."""
+    if not isinstance(points, list):
+        return []
     clean = []
     for point in points:
         if not isinstance(point, str):
