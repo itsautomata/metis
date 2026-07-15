@@ -32,16 +32,23 @@ def _file_hash(path: Path) -> str:
 
 
 def _load_sync_state() -> dict[str, str]:
-    """load previous sync state: {file_path: hash}."""
-    if SYNC_STATE_PATH.exists():
-        return json.loads(SYNC_STATE_PATH.read_text())
-    return {}
+    """load previous sync state: {file_path: hash}. tolerates a missing or corrupt file.
+    """
+    if not SYNC_STATE_PATH.exists():
+        return {}
+    try:
+        data = json.loads(SYNC_STATE_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _save_sync_state(state: dict[str, str]) -> None:
-    """persist sync state."""
+    """persist sync state atomically so an interrupted write can't corrupt it."""
     SYNC_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SYNC_STATE_PATH.write_text(json.dumps(state, indent=2))
+    tmp = SYNC_STATE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2))
+    tmp.replace(SYNC_STATE_PATH)
 
 
 def mark_file_synced(file_path: Path) -> None:
