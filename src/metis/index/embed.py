@@ -31,7 +31,16 @@ def embed_texts(texts: list[str], config: MetisConfig) -> list[list[float]]:
         for i in range(0, len(texts), BATCH_SIZE):
             batch = texts[i : i + BATCH_SIZE]
             response = client.embeddings.create(model=model, input=batch)
-            all_embeddings.extend(item.embedding for item in response.data)
+            # realign to input order (some gateways return data out of order) so a
+            # chunk is never stored against another chunk's vector, and verify the
+            # provider returned exactly one vector per input.
+            data = sorted(response.data, key=lambda item: item.index)
+            if len(data) != len(batch):
+                raise ProviderError(
+                    f"embedding provider '{model}' returned {len(data)} vectors for "
+                    f"{len(batch)} inputs; refusing to build a misaligned index."
+                )
+            all_embeddings.extend(item.embedding for item in data)
     except openai.OpenAIError as e:
         raise ProviderError(_embedding_error(model, config, e)) from e
 

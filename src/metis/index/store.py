@@ -92,6 +92,11 @@ def store_chunks_with_embeddings(
     """store pre-computed chunks and embeddings in ChromaDB."""
     if not chunks:
         return 0
+    if len(embeddings) != len(chunks):
+        raise ValueError(
+            f"embedding count {len(embeddings)} != chunk count {len(chunks)}; "
+            "refusing to store a misaligned index."
+        )
 
     collection = get_collection(config)
 
