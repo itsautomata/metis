@@ -14,14 +14,22 @@ SOURCES_INDEX_PATH = CONFIG_DIR / "sources.json"
 
 
 def _load_sources_index() -> dict[str, str]:
-    if SOURCES_INDEX_PATH.exists():
-        return json.loads(SOURCES_INDEX_PATH.read_text())
-    return {}
+    """load the source->path dedup index, tolerating a missing or corrupt file."""
+    if not SOURCES_INDEX_PATH.exists():
+        return {}
+    try:
+        data = json.loads(SOURCES_INDEX_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _save_sources_index(index: dict[str, str]) -> None:
+    """persist the dedup index atomically so an interrupted write can't corrupt it."""
     SOURCES_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SOURCES_INDEX_PATH.write_text(json.dumps(index, indent=2))
+    tmp = SOURCES_INDEX_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(index, indent=2))
+    tmp.replace(SOURCES_INDEX_PATH)
 
 
 def check_duplicate(source_link: str) -> Path | None:
