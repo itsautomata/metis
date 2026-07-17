@@ -820,7 +820,8 @@ def doctor():
     resolved_model = get_embedding_model(config)
     raw_model = (config.embedding.model or config.openai.embedding_model) if config.embedding.base_url else config.openai.embedding_model
     adapted = " (adapted for openrouter)" if resolved_model != raw_model else ""
-    check(True, "embedding", f"{resolved_model}{adapted}")
+    embed_prov = provider_of(config.embedding.base_url or config.openai.base_url)
+    check(True, "embedding", f"{resolved_model} via {embed_prov}{adapted}")
 
     collection = get_collection(config)
     if collection.count() == 0:

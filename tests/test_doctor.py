@@ -77,3 +77,26 @@ def test_doctor_survives_keyring_error(monkeypatch, tmp_path):
     result = runner.invoke(app, ["doctor"])
 
     assert "Traceback" not in result.output
+
+
+def test_doctor_embedding_names_openrouter_endpoint(monkeypatch, tmp_path):
+    """the embedding line states the endpoint, not just the model name."""
+    cfg = MetisConfig(
+        openai=OpenAIConfig(base_url="https://openrouter.ai/api/v1"),
+        chromadb_path=tmp_path / "cdb",
+    )
+    monkeypatch.setattr("metis.cli.load_config", lambda: cfg)
+    monkeypatch.setattr("keyring.get_password", lambda service, name: "sk-or-v1-a-good-key")
+
+    out = runner.invoke(app, ["doctor"]).output
+    assert "openai/text-embedding-3-small via openrouter" in out
+
+
+def test_doctor_embedding_names_openai_endpoint(monkeypatch, tmp_path):
+    """with no base_url, the embedding line says it goes via openai directly."""
+    cfg = MetisConfig(chromadb_path=tmp_path / "cdb")  # empty base_url
+    monkeypatch.setattr("metis.cli.load_config", lambda: cfg)
+    monkeypatch.setattr("keyring.get_password", lambda service, name: "sk-an-openai-key")
+
+    out = runner.invoke(app, ["doctor"]).output
+    assert "text-embedding-3-small via openai" in out
