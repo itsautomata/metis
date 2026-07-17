@@ -143,27 +143,29 @@ def load_config() -> MetisConfig:
     if not isinstance(raw, dict):
         _config_error(f"its top level must be a mapping of key: value, but it parsed as a {type(raw).__name__}.")
 
-    openai_raw = raw.get("openai", {})
+    # `.get(k) or default` (not `.get(k, default)`) so a present-but-null value
+    # (`embedding_model:` with nothing after it) falls back instead of becoming None.
+    openai_raw = raw.get("openai") or {}
     openai_cfg = OpenAIConfig(
-        base_url=openai_raw.get("base_url", ""),
-        embedding_model=openai_raw.get("embedding_model", "text-embedding-3-small"),
-        chat_model=openai_raw.get("chat_model", "gpt-4o"),
+        base_url=openai_raw.get("base_url") or "",
+        embedding_model=openai_raw.get("embedding_model") or "text-embedding-3-small",
+        chat_model=openai_raw.get("chat_model") or "gpt-4o",
     )
 
-    embedding_raw = raw.get("embedding", {}) or {}
+    embedding_raw = raw.get("embedding") or {}
     embedding_cfg = EmbeddingConfig(
-        base_url=embedding_raw.get("base_url", ""),
-        model=embedding_raw.get("model", ""),
+        base_url=embedding_raw.get("base_url") or "",
+        model=embedding_raw.get("model") or "",
     )
 
-    chromadb_raw = raw.get("chromadb", {})
+    chromadb_raw = raw.get("chromadb") or {}
 
     return MetisConfig(
-        vault_path=Path(raw.get("vault_path", DEFAULT_CONFIG["vault_path"])).expanduser(),
-        output_folder=raw.get("output_folder", "metis-ingested"),
+        vault_path=Path(raw.get("vault_path") or DEFAULT_CONFIG["vault_path"]).expanduser(),
+        output_folder=raw.get("output_folder") or "metis-ingested",
         openai=openai_cfg,
         embedding=embedding_cfg,
-        chromadb_path=Path(chromadb_raw.get("path", str(CONFIG_DIR / "chromadb"))).expanduser(),
+        chromadb_path=Path(chromadb_raw.get("path") or str(CONFIG_DIR / "chromadb")).expanduser(),
     )
 
 
