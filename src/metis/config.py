@@ -2,9 +2,9 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NoReturn
 
 import yaml
-
 
 CONFIG_DIR = Path.home() / ".metis"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
@@ -86,6 +86,18 @@ chromadb:
 """
 
 
+def _config_error(detail: str) -> NoReturn:
+    """abort with a clean message when the config file is unusable."""
+    import typer
+    from rich.console import Console
+
+    console = Console()
+    console.print(f"[red]✗ {CONFIG_PATH} is not a usable config.[/red]")
+    console.print(f"[dim]{detail}[/dim]")
+    console.print(f"[dim]fix it, or delete it to regenerate defaults: rm {CONFIG_PATH}[/dim]")
+    raise typer.Exit(1)
+
+
 def init_config() -> Path:
     """create or update config file with any missing sections. returns config path."""
     import os
@@ -98,7 +110,12 @@ def init_config() -> Path:
     else:
         # merge missing keys into existing config
         with open(CONFIG_PATH) as f:
-            existing = yaml.safe_load(f) or {}
+            try:
+                existing = yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                _config_error(f"it is not valid YAML: {e}")
+        if not isinstance(existing, dict):
+            _config_error(f"its top level must be a mapping of key: value, but it parsed as a {type(existing).__name__}.")
 
         updated = False
         for key, value in DEFAULT_CONFIG.items():
@@ -119,7 +136,12 @@ def load_config() -> MetisConfig:
         init_config()
 
     with open(CONFIG_PATH) as f:
-        raw = yaml.safe_load(f) or {}
+        try:
+            raw = yaml.safe_load(f) or {}
+        except yaml.YAMLError as e:
+            _config_error(f"it is not valid YAML: {e}")
+    if not isinstance(raw, dict):
+        _config_error(f"its top level must be a mapping of key: value, but it parsed as a {type(raw).__name__}.")
 
     openai_raw = raw.get("openai", {})
     openai_cfg = OpenAIConfig(
