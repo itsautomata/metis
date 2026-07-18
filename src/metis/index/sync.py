@@ -83,9 +83,21 @@ def _remove_file_from_index(file_path: str, config: MetisConfig) -> int:
     return 0
 
 
+class EmptyVaultError(Exception):
+    """the vault resolved to zero files while the index still holds notes.
+
+    likely an unmounted drive or a wrong vault_path, not an intentional wipe.
+    """
+
+    def __init__(self, vault_path: Path, reason: str, indexed: int) -> None:
+        self.vault_path = vault_path
+        super().__init__(f"{reason}: {vault_path}. syncing would delete all {indexed} indexed notes.")
+
+
 def sync_vault(
     config: MetisConfig,
     on_progress: Callable[[int, int, str], None] | None = None,
+    force: bool = False,
 ) -> SyncReport:
     """sync the vault with chromadb. returns a report of what changed.
 
@@ -98,6 +110,15 @@ def sync_vault(
 
     vault_files = _find_vault_files(config)
     total = len(vault_files)
+
+    if not vault_files and not force:
+        # zero files can mean "the vault was emptied" OR "vault_path is wrong / unmounted".
+        # if the index still holds notes, refuse to wipe it on this ambiguous empty result.
+        collection = get_collection(config)
+        if collection.count() > 0:
+            reason = "vault path does not exist" if not config.vault_path.exists() else "vault has no markdown files"
+            raise EmptyVaultError(config.vault_path, reason, collection.count())
+
     current_paths = set()
 
     for i, path in enumerate(vault_files):

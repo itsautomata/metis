@@ -583,7 +583,9 @@ def link(
 
 @app.command()
 @_provider_guard
-def sync():
+def sync(
+    force: bool = typer.Option(False, "--force", help="sync even if the vault resolves to zero files (removes all indexed notes)"),
+):
     """re-index vault to catch manual edits."""
     from rich.progress import (
         BarColumn,
@@ -594,33 +596,38 @@ def sync():
         TimeElapsedColumn,
     )
 
-    from metis.index.sync import sync_vault
+    from metis.index.sync import EmptyVaultError, sync_vault
 
     config = load_config()
     if not _ensure_index_model(config):
         return
     console.print(f"[bold]syncing:[/bold] {config.vault_path}\n")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        task = progress.add_task("scanning...", total=None)
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("scanning...", total=None)
 
-        def _on_progress(done: int, total: int, name: str) -> None:
-            progress.update(
-                task,
-                total=total,
-                completed=done,
-                description=f"[dim]{name[:44]}[/dim]" if name else "[dim]finishing...[/dim]",
-            )
+            def _on_progress(done: int, total: int, name: str) -> None:
+                progress.update(
+                    task,
+                    total=total,
+                    completed=done,
+                    description=f"[dim]{name[:44]}[/dim]" if name else "[dim]finishing...[/dim]",
+                )
 
-        report = sync_vault(config, on_progress=_on_progress)
+            report = sync_vault(config, on_progress=_on_progress, force=force)
+    except EmptyVaultError as e:
+        console.print(f"[red]✗ {e}[/red]")
+        console.print("[dim]if you really emptied the vault, re-run with --force (or 'metis reindex' to rebuild).[/dim]")
+        raise typer.Exit(1)
 
     console.print(f"  added:     {report.added} files")
     console.print(f"  updated:   {report.updated} files")
