@@ -90,3 +90,58 @@ def test_dedup_keys_on_canonical_source_link(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert seen["arg"] == "file:///abs/notes.md", "dedup used the raw input, not the canonical source_link"
+
+
+def test_failed_update_embed_defers_index_removal(tmp_path, monkeypatch):
+    """a failed embed during an update must not have removed the old note's vectors yet."""
+    config, existing = _make_config(tmp_path)
+    monkeypatch.setattr("metis.cli.load_config", lambda: config)
+    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src: existing)
+
+    removed = []
+    monkeypatch.setattr("metis.index.sync._remove_file_from_index", lambda path, cfg: removed.append(path))
+    monkeypatch.setattr(
+        "metis.ingest.extract.extract",
+        lambda *a, **k: ("existing note", "new text", "url", "https://example.com", None),
+    )
+    monkeypatch.setattr(
+        "metis.ingest.process.process",
+        lambda text, cfg: ProcessedContent(summary="s", key_points=[], tags=[], chunks=["chunk"]),
+    )
+
+    def _boom(*a, **k):
+        raise RuntimeError("openai down")
+    monkeypatch.setattr("metis.index.embed.embed_texts", _boom)
+
+    result = runner.invoke(app, ["ingest", "https://example.com"], input="y\n")
+
+    assert result.exit_code == 0
+    assert removed == [], "old vectors were removed before embed succeeded"
+    assert "vault is unchanged" in result.output
+
+
+def test_successful_update_still_removes_old_vectors(tmp_path, monkeypatch):
+    """on a successful update the old vectors are dropped (after embed) so nothing is orphaned."""
+    config, existing = _make_config(tmp_path)
+    monkeypatch.setattr("metis.cli.load_config", lambda: config)
+    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src: existing)
+
+    removed = []
+    monkeypatch.setattr("metis.index.sync._remove_file_from_index", lambda path, cfg: removed.append(path))
+    monkeypatch.setattr(
+        "metis.ingest.extract.extract",
+        lambda *a, **k: ("existing note", "new text", "url", "https://example.com", None),
+    )
+    monkeypatch.setattr(
+        "metis.ingest.process.process",
+        lambda text, cfg: ProcessedContent(summary="s", key_points=[], tags=["t"], chunks=["chunk"]),
+    )
+    monkeypatch.setattr("metis.index.embed.embed_texts", lambda chunks, cfg: [[0.1]])
+    monkeypatch.setattr("metis.ingest.write.write_to_vault", lambda *a, **k: existing)
+    monkeypatch.setattr("metis.index.store.store_chunks_with_embeddings", lambda *a, **k: 1)
+    monkeypatch.setattr("metis.index.sync.mark_file_synced", lambda p: None)
+
+    result = runner.invoke(app, ["ingest", "https://example.com", "--folder", "metis-ingested"], input="y\n")
+
+    assert result.exit_code == 0
+    assert removed == [str(existing)], f"old vectors not removed on a successful update: {removed}"

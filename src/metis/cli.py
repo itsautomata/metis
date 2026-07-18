@@ -183,8 +183,8 @@ def ingest(
             console.print(f"[yellow]! already ingested:[/yellow] {existing.name}")
             if not typer.confirm("update?"):
                 continue
-            from metis.index.sync import _remove_file_from_index
-            _remove_file_from_index(str(existing), config)
+            # defer removing the old note's vectors until embedding succeeds (below), so a
+            # failed embed leaves the existing note fully intact.
             replace_path = existing
 
         # 2. summarize + tag + chunk
@@ -222,8 +222,11 @@ def ingest(
                         console.print(f"[red]✗ folder must be inside the vault: {chosen}. using default.[/red]")
 
         # 5. write to vault — only after embedding succeeds.
-        if replace_path and replace_path.exists():
-            replace_path.unlink()
+        if replace_path:
+            from metis.index.sync import _remove_file_from_index
+            _remove_file_from_index(str(replace_path), config)
+            if replace_path.exists():
+                replace_path.unlink()
         console.print("[dim]writing to vault...[/dim]")
         file_path = write_to_vault(title, text, source_link, source_type, processed, config, extra=extra)
         console.print(f"  saved: {file_path}")
