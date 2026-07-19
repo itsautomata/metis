@@ -128,7 +128,7 @@ def _interactive_lang_pick(available: list) -> object:
         console.print(f"  {i}. {t.language} ({t.language_code}){auto}")
 
     while True:
-        choice = input(f"\npick language [1]: ").strip()
+        choice = input("\npick language [1]: ").strip()
         if not choice:
             return available[0]
         try:
@@ -318,7 +318,7 @@ def extract_from_pdf_url(url: str) -> tuple[str, str]:
         tmp_path.unlink()
 
     # derive title: first meaningful line of text, fallback to URL
-    first_lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
+    first_lines = [line.strip() for line in text.strip().split("\n") if line.strip()]
     title = first_lines[0][:100] if first_lines else _title_from_url(url)
 
     return title, text
@@ -385,11 +385,16 @@ def extract_from_arxiv(url: str) -> tuple[str, str]:
 
 def extract_from_pdf(path: Path) -> tuple[str, str]:
     """extract text from PDF. returns (title, text)."""
-    doc = fitz.open(str(path))
-    pages = []
-    for page in doc:
-        pages.append(page.get_text())
-    doc.close()
+    # fitz raises FileDataError/EmptyFileError (RuntimeError) on a truncated or garbage PDF;
+    # convert to ValueError so cli.py catches it as a clean per-source skip, not a batch abort.
+    try:
+        doc = fitz.open(str(path))
+        pages = []
+        for page in doc:
+            pages.append(page.get_text())
+        doc.close()
+    except RuntimeError as e:
+        raise ValueError(f"could not read PDF {path.name}: {e}") from e
 
     text = "\n\n".join(pages).strip()
     title = path.stem.replace("-", " ").replace("_", " ")
