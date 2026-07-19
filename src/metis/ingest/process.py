@@ -163,22 +163,30 @@ def chunk_text(text: str, max_chars: int = 1500) -> list[str]:
     if current.strip():
         chunks.append(current.strip())
 
-    # safety: if any chunk is still too long, hard-split it
+    # safety: hard-split any chunk still over the limit, char-slicing space-free runs so a
+    # single giant token can't slip through oversized or leave an empty chunk behind.
     safe_chunks = []
     for chunk in chunks:
-        if len(chunk) > max_chars * 2:
-            words = chunk.split()
-            sub = ""
-            for word in words:
-                if len(sub) + len(word) + 1 > max_chars:
-                    safe_chunks.append(sub.strip())
-                    sub = word
-                else:
-                    sub = sub + " " + word if sub else word
-            if sub.strip():
-                safe_chunks.append(sub.strip())
-        else:
+        if len(chunk) <= max_chars * 2:
             safe_chunks.append(chunk)
+            continue
+        sub = ""
+        for word in chunk.split():
+            while len(word) > max_chars:
+                if sub:
+                    safe_chunks.append(sub.strip())
+                    sub = ""
+                safe_chunks.append(word[:max_chars])
+                word = word[max_chars:]
+            if not word:
+                continue
+            if sub and len(sub) + len(word) + 1 > max_chars:
+                safe_chunks.append(sub.strip())
+                sub = word
+            else:
+                sub = f"{sub} {word}" if sub else word
+        if sub.strip():
+            safe_chunks.append(sub.strip())
 
     return safe_chunks if safe_chunks else [text[:max_chars]]
 
