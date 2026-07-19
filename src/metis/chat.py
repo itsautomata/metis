@@ -144,6 +144,22 @@ def format_qa_entry(question: str, answer: str, expanded_from: tuple[str, str] |
     return entry
 
 
+def _mask_code_fences(text: str) -> str:
+    """blank out fenced code block content (same length, newlines kept) so a heading marker
+    like '## Transcript' inside a code block isn't mistaken for a real section heading."""
+    out = []
+    in_fence = False
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith(("```", "~~~")):
+            in_fence = not in_fence
+            out.append(line)
+        elif in_fence:
+            out.append(" " * (len(line) - 1) + "\n" if line.endswith("\n") else " " * len(line))
+        else:
+            out.append(line)
+    return "".join(out)
+
+
 def save_qa_to_note(
     note_path: str,
     question: str,
@@ -155,22 +171,26 @@ def save_qa_to_note(
     text = read_note_text(path)
     entry = format_qa_entry(question, answer, expanded_from=expanded_from)
 
+    # search on a copy with fenced code blanked out, so a '## Transcript'/'## Q&A' line inside a
+    # code block isn't mistaken for a real heading. positions line up with the original text.
+    masked = _mask_code_fences(text)
+
     # find where to insert — before ## Transcript or ## Content
     insert_patterns = [r"\n## Transcript\b", r"\n## Content\b"]
     insert_pos = None
 
     for pattern in insert_patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, masked)
         if match:
             insert_pos = match.start()
             break
 
-    qa_match = re.search(r"## Q&A\r?\n", text)
+    qa_match = re.search(r"## Q&A\r?\n", masked)
     if qa_match:
         # append to existing Q&A section
         insert_after = qa_match.end()
         # find the end of existing Q&A content (next ## heading or the insert_pos)
-        next_heading = re.search(r"\n## (?!Q&A)", text[insert_after:])
+        next_heading = re.search(r"\n## (?!Q&A)", masked[insert_after:])
         if next_heading:
             qa_end = insert_after + next_heading.start()
         else:
