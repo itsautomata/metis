@@ -12,6 +12,10 @@ EMBEDDING_KEY = "embedding-api-key"
 X_BEARER = "x-bearer-token"
 
 
+class KeychainError(RuntimeError):
+    """the OS keychain is unavailable, so a secret could not be written or removed."""
+
+
 def get_secret(name: str, fallback_env: str = "") -> str:
     """retrieve a secret. checks the keychain, then the env var. empty string if neither.
 
@@ -34,14 +38,20 @@ def get_secret(name: str, fallback_env: str = "") -> str:
 
 def set_secret(name: str, value: str) -> None:
     """store a secret in the OS keychain."""
-    keyring.set_password(SERVICE, name, value)
+    try:
+        keyring.set_password(SERVICE, name, value)
+    except keyring.errors.KeyringError as e:
+        raise KeychainError(
+            "no usable OS keychain backend, so the secret was not saved. "
+            "set the matching METIS_*_KEY environment variable instead."
+        ) from e
 
 
 def delete_secret(name: str) -> None:
     """remove a secret from the OS keychain."""
     try:
         keyring.delete_password(SERVICE, name)
-    except keyring.errors.PasswordDeleteError:
+    except keyring.errors.KeyringError:
         pass
 
 
