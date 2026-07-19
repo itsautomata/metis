@@ -8,7 +8,7 @@ import typer
 import typer.rich_utils
 from rich.console import Console
 
-from metis.config import load_config, init_config
+from metis.config import init_config, load_config
 
 # align typer's auto-generated help accent with metis's magenta
 typer.rich_utils.STYLE_OPTION = "bold magenta"
@@ -118,12 +118,12 @@ def ingest(
 ):
     """save, summarize, tag, embed, and find links for files or URLs."""
     from metis.client import ProviderError
-    from metis.ingest.extract import extract, NoTranscriptError
-    from metis.ingest.process import process
-    from metis.ingest.write import write_to_vault, write_link_only, check_duplicate
     from metis.index.embed import embed_texts
-    from metis.index.store import store_chunks_with_embeddings
+    from metis.index.store import EmbeddingModelMismatch, store_chunks_with_embeddings
     from metis.index.sync import mark_file_synced
+    from metis.ingest.extract import NoTranscriptError, extract
+    from metis.ingest.process import process
+    from metis.ingest.write import check_duplicate, write_link_only, write_to_vault
 
     config = load_config()
     if not _ensure_index_model(config):
@@ -132,6 +132,9 @@ def ingest(
     if pick_folder_flag and not folder:
         from metis.pick import pick_folder
         folder = pick_folder(config)
+        if not folder:
+            console.print("[yellow]! folder pick cancelled, nothing ingested.[/yellow]")
+            return
 
     if folder:
         resolved = (config.vault_path / folder).resolve()
@@ -165,7 +168,7 @@ def ingest(
             save = typer.confirm("save link anyway?")
             if save:
                 file_path = write_link_only(source, config)
-                console.print(f"[bold green]✓ link saved.[/bold green]")
+                console.print("[bold green]✓ link saved.[/bold green]")
                 console.print(f"  note: {file_path}")
             continue
         except (FileNotFoundError, ValueError) as e:
@@ -207,7 +210,7 @@ def ingest(
         # 4. suggest folder if none specified (only for first source in batch, or each)
         if not folder and not pick_folder_flag:
             config.output_folder = default_folder
-            from metis.classify import suggest_folder, record_feedback
+            from metis.classify import record_feedback, suggest_folder
             suggestions = suggest_folder(embeddings[0], config)
             if suggestions:
                 top_folder = suggestions[0][0]
@@ -232,7 +235,11 @@ def ingest(
         console.print(f"  saved: {file_path}")
 
         # 6. store vectors with pre-computed embeddings
-        n = store_chunks_with_embeddings(processed.chunks, embeddings, file_path, config)
+        try:
+            n = store_chunks_with_embeddings(processed.chunks, embeddings, file_path, config)
+        except EmbeddingModelMismatch as e:
+            console.print(f"[red]✗ {e}[/red]")
+            continue
         console.print(f"  indexed: {n} chunks")
 
         # record the note in sync state so a later `metis sync` won't re-embed it
@@ -396,7 +403,7 @@ def chat(
     expand: bool = typer.Option(False, "--expand", "-e", help="always offer external source search"),
 ):
     """RAG agent loop over your knowledge base."""
-    from metis.chat import ask, save_qa_to_note, LOW_CONFIDENCE_THRESHOLD
+    from metis.chat import LOW_CONFIDENCE_THRESHOLD, ask
 
     config = load_config()
     if not _ensure_index_model(config):
@@ -416,13 +423,16 @@ def chat(
             note_p = note_p.with_suffix(".md")
         if not note_p.is_absolute():
             note_p = config.vault_path / note_p
-        if not note_p.resolve().is_relative_to(config.vault_path.resolve()):
+        resolved = note_p.resolve()
+        if not resolved.is_relative_to(config.vault_path.resolve()):
             console.print(f"[red]✗ note must be inside the vault: {note}[/red]")
             return
-        note_path = str(note_p)
         if not note_p.exists():
-            console.print(f"[red]✗ note not found: {note_path}[/red]")
+            console.print(f"[red]✗ note not found: {note}[/red]")
             return
+        # match the exact file_path the index stores (vault_path + clean relative), so a
+        # `..` or symlinked --note path still hits the stored chunks instead of silently missing.
+        note_path = str(config.vault_path / resolved.relative_to(config.vault_path.resolve()))
 
     if question is None:
         _chat_repl(config, note_path, save)
@@ -445,24 +455,37 @@ def chat(
     if confidence < LOW_CONFIDENCE_THRESHOLD:
         console.print(f"\n[yellow]low confidence ({confidence:.2f})[/yellow]")
 
-    # save Q&A to note — always offer when --note is used
-    if note_path:
-        if save or typer.confirm("\nsave to note?"):
-            save_qa_to_note(note_path, question, answer)
-            console.print("[bold green]✓ Q&A saved.[/bold green]")
-
-    # offer external expansion — on low confidence or --expand flag
-    if expand or confidence < LOW_CONFIDENCE_THRESHOLD:
-        _offer_expand(question, config, note_path, save)
+    # when an expansion will be offered, defer the save so the final answer replaces (not
+    # duplicates) this one; _offer_expand then owns the single save for this question.
+    will_expand = expand or confidence < LOW_CONFIDENCE_THRESHOLD
+    if not will_expand:
+        _maybe_save_qa(note_path, question, answer, save)
+    else:
+        _offer_expand(question, answer, config, note_path, save)
 
 
-def _offer_expand(question: str, config, note_path: str | None, save: bool):
-    """offer wikipedia search after a chat answer."""
-    from metis.expand import search_wikipedia, ingest_external, extract_search_keywords
-    from metis.chat import ask, save_qa_to_note
+def _maybe_save_qa(note_path, question, answer, save, *, expanded_from=None):
+    """save the Q&A when --save is set, else offer it; keeps one entry per question."""
+    if not note_path:
+        return
+    from metis.chat import save_qa_to_note
+    if save or typer.confirm("\nsave to note?"):
+        save_qa_to_note(note_path, question, answer, expanded_from=expanded_from)
+        console.print("[bold green]✓ Q&A saved.[/bold green]")
+
+
+def _offer_expand(question: str, answer: str, config, note_path: str | None, save: bool):
+    """offer wikipedia expansion, then save exactly one Q&A entry.
+
+    the caller defers its save so this owns it: the expanded answer is saved on success, and the
+    original answer is kept as a fallback whenever the expansion does not complete.
+    """
+    from metis.chat import ask
+    from metis.expand import extract_search_keywords, ingest_external, search_wikipedia
 
     console.print()
     if not typer.confirm("expand via wikipedia?"):
+        _maybe_save_qa(note_path, question, answer, save)
         return
 
     console.print("[dim]extracting search keywords...[/dim]")
@@ -480,10 +503,12 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
             console.print("[yellow]! search timed out — try again later.[/yellow]")
         else:
             console.print(f"[red]✗ search failed: {err}[/red]")
+        _maybe_save_qa(note_path, question, answer, save)
         return
 
     if not results:
         console.print("[yellow]! no results found.[/yellow]")
+        _maybe_save_qa(note_path, question, answer, save)
         return
 
     # interactive picker for wikipedia results
@@ -492,6 +517,7 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
     picked_title = pick_wikipedia(wiki_choices)
 
     if not picked_title:
+        _maybe_save_qa(note_path, question, answer, save)
         return
 
     best = next(r for r in results if r.title == picked_title)
@@ -513,13 +539,9 @@ def _offer_expand(question: str, config, note_path: str | None, save: bool):
             name = Path(s).name
             console.print(f"  [dim]- {name}[/dim]")
 
-    # save Q&A to note if requested
-    if save and note_path:
-        if typer.confirm("\nsave to note?"):
-            note_name = Path(file_path).stem
-            expanded_from = (best.source_type, note_name)
-            save_qa_to_note(note_path, question, answer, expanded_from=expanded_from)
-            console.print("[bold green]✓ Q&A saved.[/bold green]")
+    # save the expanded answer — the single Q&A entry for this question
+    note_name = Path(file_path).stem
+    _maybe_save_qa(note_path, question, answer, save, expanded_from=(best.source_type, note_name))
 
 
 @app.command()
@@ -532,7 +554,7 @@ def link(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="explain why notes are connected"),
 ):
     """surface connections between notes."""
-    from metis.link import find_connections, write_links, explain_connection
+    from metis.link import explain_connection, find_connections, write_links
 
     config = load_config()
     if not _ensure_index_model(config):
@@ -599,6 +621,7 @@ def sync(
         TimeElapsedColumn,
     )
 
+    from metis.index.store import EmbeddingModelMismatch
     from metis.index.sync import EmptyVaultError, sync_vault
 
     config = load_config()
@@ -630,6 +653,9 @@ def sync(
     except EmptyVaultError as e:
         console.print(f"[red]✗ {e}[/red]")
         console.print("[dim]if you really emptied the vault, re-run with --force (or 'metis reindex' to rebuild).[/dim]")
+        raise typer.Exit(1)
+    except EmbeddingModelMismatch as e:
+        console.print(f"[red]✗ {e}[/red]")
         raise typer.Exit(1)
 
     console.print(f"  added:     {report.added} files")
@@ -688,6 +714,7 @@ def config_cmd(
 ):
     """view or change metis settings."""
     import yaml
+
     from metis.config import CONFIG_PATH, init_config
 
     init_config()
@@ -855,7 +882,14 @@ def secret(
     name: Optional[str] = typer.Argument(None, help="key name: provider-key, embedding-key, x-token"),
 ):
     """manage api keys in the OS keychain."""
-    from metis.secrets import set_secret, delete_secret, PROVIDER_KEY, EMBEDDING_KEY, X_BEARER
+    from metis.secrets import (
+        EMBEDDING_KEY,
+        PROVIDER_KEY,
+        X_BEARER,
+        KeychainError,
+        delete_secret,
+        set_secret,
+    )
 
     key_map = {
         "provider-key": PROVIDER_KEY,
@@ -894,7 +928,11 @@ def secret(
         if not value:
             console.print("[yellow]! empty value, nothing saved.[/yellow]")
             return
-        set_secret(keychain_name, value)
+        try:
+            set_secret(keychain_name, value)
+        except KeychainError as e:
+            console.print(f"[red]✗ {e}[/red]")
+            return
         console.print(f"[bold green]✓ {name} saved to keychain.[/bold green]")
 
     elif action == "delete":
@@ -913,8 +951,11 @@ def folders(
     import os
     import subprocess
     import tempfile
+
     from metis.classify import (
-        _auto_describe_folder, _load_categorization, _save_categorization,
+        _auto_describe_folder,
+        _load_categorization,
+        _save_categorization,
         get_folder_embeddings,
     )
     from metis.config import vault_folders

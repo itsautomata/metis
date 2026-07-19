@@ -1,7 +1,6 @@
 """semantic search across the vault."""
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from metis.config import MetisConfig
 from metis.index.embed import embed_texts

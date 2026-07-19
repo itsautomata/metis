@@ -6,12 +6,12 @@ from pathlib import Path
 
 import httpx
 
-from metis.client import get_client, get_chat_model
+from metis.client import get_chat_model, get_client
 from metis.config import MetisConfig
+from metis.index.store import store_chunks
 from metis.ingest.extract import extract
 from metis.ingest.process import process
 from metis.ingest.write import write_to_vault
-from metis.index.store import store_chunks
 
 
 @dataclass
