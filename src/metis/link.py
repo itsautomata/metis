@@ -165,6 +165,22 @@ def explain_connection(connection: Connection, config: MetisConfig) -> str:
     return (response.choices[0].message.content or "").strip()
 
 
+def _mask_code_fences(text: str) -> str:
+    """blank out fenced code block content (same length, newlines kept) so a heading marker
+    like '## Content' inside a code block isn't mistaken for a real section heading."""
+    out = []
+    in_fence = False
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith(("```", "~~~")):
+            in_fence = not in_fence
+            out.append(line)
+        elif in_fence:
+            out.append(" " * (len(line) - 1) + "\n" if line.endswith("\n") else " " * len(line))
+        else:
+            out.append(line)
+    return "".join(out)
+
+
 def write_links(connections: list[Connection]) -> int:
     """write [[wikilinks]] into source notes. returns count of links written."""
     written = 0
@@ -180,29 +196,28 @@ def write_links(connections: list[Connection]) -> int:
             continue
 
         text = read_note_text(path)
+        masked = _mask_code_fences(text)  # locate headings outside code fences
 
         links_section = "\n\n## Connections\n\n"
         for c in conns:
             target_name = _note_name(c.target)
             links_section += f"- [[{target_name}]] [{c.score}]\n"
 
-        # insert or replace connections section — before Transcript/Content
-        if "## Connections" in text:
-            text = re.sub(
-                r"\n\n## Connections\n\n.*?(?=\n## |\Z)",
-                links_section,
-                text,
-                flags=re.DOTALL,
-            )
+        # replace an existing Connections section, else insert before Transcript/Content, else append
+        conn_match = re.search(r"\n*## Connections\b.*?(?=\n## |\Z)", masked, flags=re.DOTALL)
+        if conn_match:
+            new_text = text[:conn_match.start()] + links_section + text[conn_match.end():]
         else:
-            # insert before Transcript or Content if they exist
-            insert_match = re.search(r"\n## (Transcript|Content)\b", text)
+            insert_match = re.search(r"\n## (Transcript|Content)\b", masked)
             if insert_match:
-                text = text[:insert_match.start()] + links_section + text[insert_match.start():]
+                new_text = text[:insert_match.start()] + links_section + text[insert_match.start():]
             else:
-                text += links_section
+                # rstrip so appending matches the replace path's spacing (keeps it idempotent)
+                new_text = text.rstrip("\n") + links_section
 
-        path.write_text(text, encoding="utf-8")
-        written += len(conns)
+        # count only links actually written: a no-op change reports zero, not false success
+        if new_text != text:
+            path.write_text(new_text, encoding="utf-8")
+            written += len(conns)
 
     return written
