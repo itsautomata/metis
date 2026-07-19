@@ -35,7 +35,15 @@ def test_slugify_dashes():
     assert slugify("multi---dash") == "multi-dash"
 
 def test_slugify_empty():
-    assert slugify("") == ""
+    assert slugify("") == "note"  # empty title must not become a hidden ".md" dotfile
+
+
+def test_slugify_emoji_only():
+    assert slugify("🎉🔥💯") == "note"  # symbol-only title must not become a ".md" dotfile
+
+
+def test_slugify_punctuation_only():
+    assert slugify("!!!") == "note"
 
 def test_slugify_unicode():
     result = slugify("café résumé")

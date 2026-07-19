@@ -58,7 +58,8 @@ def slugify(title: str) -> str:
     slug = re.sub(r"[^\w\s-]", "", slug)
     slug = re.sub(r"[\s_]+", "-", slug)
     slug = re.sub(r"-+", "-", slug)
-    return slug.strip("-")[:80]
+    # emoji/symbol-only or empty titles strip to "" -> a hidden ".md" dotfile; fall back.
+    return slug.strip("-")[:80] or "note"
 
 
 def _demote_headings(md: str, by: int = 2) -> str:
