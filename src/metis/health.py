@@ -1,7 +1,7 @@
 """vault health analysis using DBSCAN clustering and KNN misplacement detection."""
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -269,7 +269,10 @@ def analyze_split(folder: str, config: MetisConfig) -> list[ClusterInfo] | None:
     runs KMeans(k=2) on just this folder's embeddings, independent of global clustering.
     returns two ClusterInfo groups, or None if folder is too small.
     """
+    import warnings
+
     from sklearn.cluster import KMeans
+    from sklearn.exceptions import ConvergenceWarning
 
     file_paths, embeddings, folders = _extract_vault_data(config)
 
@@ -281,9 +284,16 @@ def analyze_split(folder: str, config: MetisConfig) -> list[ClusterInfo] | None:
     folder_fps = [file_paths[i] for i in indices]
     folder_embs = np.array([embeddings[i] for i in indices])
 
-    # run KMeans with k=2
+    # run KMeans with k=2; a homogeneous folder makes it collapse to one cluster and emit a
+    # ConvergenceWarning we expect and handle just below, so silence that noise for this call.
     km = KMeans(n_clusters=2, n_init=10, random_state=42)
-    labels = km.fit_predict(folder_embs)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=ConvergenceWarning)
+        labels = km.fit_predict(folder_embs)
+
+    # a homogeneous folder collapses every point into one cluster; there is nothing to split
+    if len(set(labels)) < 2:
+        return None
 
     # organize into two groups
     groups: dict[int, list[str]] = defaultdict(list)
