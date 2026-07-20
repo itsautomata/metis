@@ -176,6 +176,12 @@ def sync_vault(
     report.total_files = len(vault_files)
     _save_sync_state(new_state)
 
+    # baseline the drift canary for any non-empty index (idempotent; also covers a pre-existing
+    # index whose sync is a no-op and would otherwise never get a baseline)
+    if collection.count() > 0:
+        from metis.index.canary import ensure_baseline
+        ensure_baseline(config)
+
     return report
 
 
@@ -199,5 +205,8 @@ def reindex_vault(config: MetisConfig) -> SyncReport:
     if SYNC_STATE_PATH.exists():
         SYNC_STATE_PATH.unlink()
     clear_folder_embeddings()
+    # drop the drift baseline; sync_vault below re-captures it against the new model
+    from metis.index.canary import reset as reset_canary
+    reset_canary()
 
     return sync_vault(config)

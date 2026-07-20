@@ -118,6 +118,7 @@ def ingest(
 ):
     """save, summarize, tag, embed, and find links for files or URLs."""
     from metis.client import ProviderError
+    from metis.index.canary import ensure_baseline
     from metis.index.embed import embed_texts
     from metis.index.store import EmbeddingModelMismatch, store_chunks_with_embeddings
     from metis.index.sync import mark_file_synced
@@ -244,6 +245,8 @@ def ingest(
 
         # record the note in sync state so a later `metis sync` won't re-embed it
         mark_file_synced(file_path)
+        # baseline the drift canary once the first vectors for this model have landed
+        ensure_baseline(config)
 
         console.print(f"[bold green]✓ done.[/bold green] {file_path.name}")
 
@@ -629,6 +632,13 @@ def sync(
         return
     console.print(f"[bold]syncing:[/bold] {config.vault_path}\n")
 
+    from metis.index.canary import check_drift
+    _drift = check_drift(config)
+    if _drift.status == "drift":
+        console.print("[yellow]⚠ embedding output has drifted since the index was built; new chunks will land in a different space. consider 'metis reindex' first.[/yellow]\n")
+    elif _drift.status == "variance":
+        console.print("[yellow]⚠ provider returns unstable embeddings (non-deterministic routing); pin the provider/quantization, reindex will not fix this.[/yellow]\n")
+
     try:
         with Progress(
             SpinnerColumn(),
@@ -822,7 +832,11 @@ def models():
 
 @app.command()
 def doctor():
-    """validate the setup offline and print a ✓/✗ checklist. exits non-zero if anything is off."""
+    """validate the setup and print a ✓/✗ checklist. exits non-zero if anything is off.
+
+    includes a live embedding-drift check (re-embeds a canary); it degrades to a neutral
+    result when the provider is unreachable, so the rest of the checklist still works offline.
+    """
     import os
 
     from metis.client import get_chat_model, get_embedding_model, provider_of
@@ -867,6 +881,18 @@ def doctor():
         stamped = indexed_embedding_model(collection)
         matches = stamped == resolved_model
         check(matches, "index", f"built with {stamped}", "" if matches else "run 'metis reindex'")
+
+    if collection.count() > 0:
+        from metis.index.canary import check_drift
+        verdict = check_drift(config)
+        if verdict.status == "drift":
+            check(False, "drift", "embedding model changed since the index was built", "run 'metis reindex'")
+        elif verdict.status == "variance":
+            check(False, "drift", "provider returns unstable embeddings (non-deterministic routing)", "pin the provider/quantization; reindex will not fix this")
+        elif verdict.status == "unavailable":
+            check(False, "drift", verdict.detail, "check your connection or key")
+        else:  # stable | not_baselined
+            check(True, "drift", verdict.detail)
 
     console.print()
     if ok:
