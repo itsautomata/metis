@@ -98,6 +98,15 @@ def _config_error(detail: str) -> NoReturn:
     raise typer.Exit(1)
 
 
+def _require_mapping(value, name: str) -> dict:
+    """a present-but-null section falls back to defaults; a scalar or list is a clear mistake."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        _config_error(f"the `{name}:` section must be a mapping of key: value, not a {type(value).__name__}.")
+    return value
+
+
 def init_config() -> Path:
     """create or update config file with any missing sections. returns config path."""
     import os
@@ -145,27 +154,27 @@ def load_config() -> MetisConfig:
 
     # `.get(k) or default` (not `.get(k, default)`) so a present-but-null value
     # (`embedding_model:` with nothing after it) falls back instead of becoming None.
-    openai_raw = raw.get("openai") or {}
+    openai_raw = _require_mapping(raw.get("openai"), "openai")
     openai_cfg = OpenAIConfig(
         base_url=openai_raw.get("base_url") or "",
         embedding_model=openai_raw.get("embedding_model") or "text-embedding-3-small",
         chat_model=openai_raw.get("chat_model") or "gpt-4o",
     )
 
-    embedding_raw = raw.get("embedding") or {}
+    embedding_raw = _require_mapping(raw.get("embedding"), "embedding")
     embedding_cfg = EmbeddingConfig(
         base_url=embedding_raw.get("base_url") or "",
         model=embedding_raw.get("model") or "",
     )
 
-    chromadb_raw = raw.get("chromadb") or {}
+    chromadb_raw = _require_mapping(raw.get("chromadb"), "chromadb")
 
     return MetisConfig(
-        vault_path=Path(raw.get("vault_path") or DEFAULT_CONFIG["vault_path"]).expanduser(),
-        output_folder=raw.get("output_folder") or "metis-ingested",
+        vault_path=Path(str(raw.get("vault_path") or DEFAULT_CONFIG["vault_path"])).expanduser(),
+        output_folder=str(raw.get("output_folder") or "metis-ingested"),
         openai=openai_cfg,
         embedding=embedding_cfg,
-        chromadb_path=Path(chromadb_raw.get("path") or str(CONFIG_DIR / "chromadb")).expanduser(),
+        chromadb_path=Path(str(chromadb_raw.get("path") or (CONFIG_DIR / "chromadb"))).expanduser(),
     )
 
 
