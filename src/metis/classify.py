@@ -16,7 +16,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from metis.config import CONFIG_DIR, MetisConfig, vault_folders
 from metis.index.embed import embed_texts
-from metis.index.store import get_collection
+from metis.index.store import get_collection, query_collection
 from metis.textio import read_note_text
 
 CATEGORIZATION_PATH = CONFIG_DIR / "categorization.json"
@@ -24,15 +24,27 @@ CATEGORIZATION_PATH = CONFIG_DIR / "categorization.json"
 
 # --- data storage ---
 
-def _load_categorization() -> dict:
-    if CATEGORIZATION_PATH.exists():
-        return json.loads(CATEGORIZATION_PATH.read_text())
+def _default_categorization() -> dict:
     return {"folder_descriptions": {}, "folder_embeddings": {}, "feedback": []}
+
+
+def _load_categorization() -> dict:
+    if not CATEGORIZATION_PATH.exists():
+        return _default_categorization()
+    try:
+        data = json.loads(CATEGORIZATION_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        # a truncated write (an interrupted save of this multi-MB file) must not brick ingest;
+        # fall back to defaults and let the next save rewrite it.
+        return _default_categorization()
+    return data if isinstance(data, dict) else _default_categorization()
 
 
 def _save_categorization(data: dict) -> None:
     CATEGORIZATION_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CATEGORIZATION_PATH.write_text(json.dumps(data, indent=2))
+    tmp = CATEGORIZATION_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(CATEGORIZATION_PATH)
 
 
 def clear_folder_embeddings() -> None:
@@ -185,7 +197,9 @@ def knn_scores(note_embedding: list[float], config: MetisConfig, k: int = 5) -> 
     if count == 0:
         return {}
 
-    results = collection.query(
+    results = query_collection(
+        collection,
+        config,
         query_embeddings=[note_embedding],
         n_results=min(count, k * KNN_OVERFETCH),
     )
