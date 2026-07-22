@@ -22,6 +22,7 @@ class SyncReport:
     updated: int = 0
     deleted: int = 0
     unchanged: int = 0
+    skipped: int = 0
     total_files: int = 0
     total_chunks: int = 0
 
@@ -125,30 +126,38 @@ def sync_vault(
         if on_progress:
             on_progress(i, total, path.name)
         file_key = str(path)
+
+        try:
+            current_hash = _file_hash(path)
+
+            if file_key not in old_state:
+                # new file
+                text = read_note_text(path)
+                chunks = chunk_text(text)
+                n = store_chunks(chunks, path, config)
+                report.added += 1
+                report.total_chunks += n
+
+            elif old_state[file_key] != current_hash:
+                # changed file — remove old chunks, add new
+                _remove_file_from_index(file_key, config)
+                text = read_note_text(path)
+                chunks = chunk_text(text)
+                n = store_chunks(chunks, path, config)
+                report.updated += 1
+                report.total_chunks += n
+
+            else:
+                # unchanged
+                report.unchanged += 1
+        except (FileNotFoundError, IsADirectoryError):
+            # a broken symlink, or a file moved/deleted between the scan and now: leave it out of
+            # current_paths so its stale vectors get pruned below, and move on.
+            report.skipped += 1
+            continue
+
         current_paths.add(file_key)
-        current_hash = _file_hash(path)
         new_state[file_key] = current_hash
-
-        if file_key not in old_state:
-            # new file
-            text = read_note_text(path)
-            chunks = chunk_text(text)
-            n = store_chunks(chunks, path, config)
-            report.added += 1
-            report.total_chunks += n
-
-        elif old_state[file_key] != current_hash:
-            # changed file — remove old chunks, add new
-            _remove_file_from_index(file_key, config)
-            text = read_note_text(path)
-            chunks = chunk_text(text)
-            n = store_chunks(chunks, path, config)
-            report.updated += 1
-            report.total_chunks += n
-
-        else:
-            # unchanged
-            report.unchanged += 1
 
     if on_progress:
         on_progress(total, total, "")
