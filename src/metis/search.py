@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from metis.config import MetisConfig
 from metis.index.embed import embed_texts
-from metis.index.store import get_collection
+from metis.index.store import get_collection, query_collection
 
 
 @dataclass
@@ -34,7 +34,9 @@ def search_vault(
 
     where_filter = {"file_path": note_path} if note_path else None
 
-    results = collection.query(
+    results = query_collection(
+        collection,
+        config,
         query_embeddings=[query_embedding],
         n_results=min(limit, collection.count()),
         where=where_filter,

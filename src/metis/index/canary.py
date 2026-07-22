@@ -112,6 +112,10 @@ def check_drift(config: MetisConfig) -> DriftVerdict:
     if worst_self < STABLE_SIM:
         return DriftVerdict("variance", "embeddings differ across back-to-back calls", worst_self)
 
+    # a width change behind an unchanged model id is drift by definition (and would crash _cosine)
+    if any(len(p) != len(b) for p, b in zip(probe1, baseline)):
+        return DriftVerdict("drift", "embedding dimension changed since the index was built")
+
     worst_ref = min(_cosine(a, b) for a, b in zip(probe1, baseline))
     if worst_ref < STABLE_SIM:
         return DriftVerdict("drift", "embedding output changed since the index was built", worst_ref)

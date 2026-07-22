@@ -64,26 +64,46 @@ def _canonical_embedding_model(name: str) -> str:
     return name.removeprefix("openai/") if name else name
 
 
-def _safe_upsert(collection, config, *, ids, embeddings, documents, metadatas) -> None:
-    """upsert, translating chromadb's fixed-dimension lock into an actionable reindex hint.
+def _dimension_mismatch(e: InvalidArgumentError, collection, config) -> "EmbeddingModelMismatch | None":
+    """translate chromadb's fixed-width lock into an actionable reindex hint, or None if the
+    InvalidArgumentError is about something else.
 
     chromadb pins the vector width on the first insert; a model whose id still matches the stamp
-    but whose backend now emits a different width (a gateway repointed behind the same id) would
-    otherwise raise a raw InvalidArgumentError mid-write.
+    but whose backend now emits a different width (a gateway repointed behind the same id) trips
+    this on both the write (upsert) and read (query) path.
     """
+    dims = re.search(r"dimension of (\d+), got (\d+)", str(e))
+    if not dims:
+        return None
+    configured = get_embedding_model(config)
+    return EmbeddingModelMismatch(
+        indexed_embedding_model(collection),
+        configured,
+        detail=(f"the index stores {dims.group(1)}-dim vectors but the configured model "
+                f"'{configured}' produced {dims.group(2)}-dim vectors."),
+    )
+
+
+def _safe_upsert(collection, config, *, ids, embeddings, documents, metadatas) -> None:
+    """upsert, translating chromadb's fixed-dimension lock into an actionable reindex hint."""
     try:
         collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
     except InvalidArgumentError as e:
-        dims = re.search(r"dimension of (\d+), got (\d+)", str(e))
-        if not dims:
-            raise
-        configured = get_embedding_model(config)
-        raise EmbeddingModelMismatch(
-            indexed_embedding_model(collection),
-            configured,
-            detail=(f"the index stores {dims.group(1)}-dim vectors but the configured model "
-                    f"'{configured}' produced {dims.group(2)}-dim vectors."),
-        ) from e
+        mismatch = _dimension_mismatch(e, collection, config)
+        if mismatch:
+            raise mismatch from e
+        raise
+
+
+def query_collection(collection, config, **query_kwargs) -> dict:
+    """collection.query, translating the same fixed-dimension lock _safe_upsert handles on write."""
+    try:
+        return collection.query(**query_kwargs)
+    except InvalidArgumentError as e:
+        mismatch = _dimension_mismatch(e, collection, config)
+        if mismatch:
+            raise mismatch from e
+        raise
 
 
 def check_embedding_model(config: MetisConfig) -> None:
