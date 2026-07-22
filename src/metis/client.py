@@ -28,7 +28,7 @@ def get_client(config: MetisConfig) -> OpenAI:
     """
     api_key = get_provider_key()
     if not api_key:
-        raise ValueError("API key not set. run 'metis secret set provider-key' or set METIS_PROVIDER_KEY")
+        raise ProviderError("API key not set. run 'metis secret set provider-key' or set METIS_PROVIDER_KEY")
     return OpenAI(api_key=api_key, base_url=config.openai.base_url or None)
 
 
@@ -43,7 +43,7 @@ def get_embedding_client(config: MetisConfig) -> OpenAI:
         return get_client(config)
     api_key = get_embedding_key() or get_provider_key()
     if not api_key:
-        raise ValueError(
+        raise ProviderError(
             "no API key for embeddings. run 'metis secret set embedding-key' or 'metis secret set provider-key'"
         )
     return OpenAI(api_key=api_key, base_url=emb.base_url)

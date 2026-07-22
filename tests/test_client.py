@@ -4,7 +4,12 @@ from unittest.mock import patch
 
 import pytest
 
-from metis.client import get_client, get_embedding_client, get_embedding_model
+from metis.client import (
+    ProviderError,
+    get_client,
+    get_embedding_client,
+    get_embedding_model,
+)
 from metis.config import EmbeddingConfig, MetisConfig, OpenAIConfig
 
 
@@ -26,7 +31,7 @@ def test_empty_base_url_passes_none(monkeypatch):
 
 def test_missing_key_raises(monkeypatch):
     monkeypatch.setattr("metis.client.get_provider_key", lambda: "")
-    with pytest.raises(ValueError, match="secret set provider-key"):
+    with pytest.raises(ProviderError, match="secret set provider-key"):
         get_client(MetisConfig())
 
 
@@ -63,7 +68,7 @@ def test_embedding_client_falls_back_to_openai_key(monkeypatch):
 def test_embedding_client_raises_when_no_key_anywhere(monkeypatch):
     monkeypatch.setattr("metis.client.get_embedding_key", lambda: "")
     monkeypatch.setattr("metis.client.get_provider_key", lambda: "")
-    with pytest.raises(ValueError, match="no API key for embeddings"):
+    with pytest.raises(ProviderError, match="no API key for embeddings"):
         get_embedding_client(MetisConfig(embedding=EmbeddingConfig(base_url="https://embed")))
 
 
