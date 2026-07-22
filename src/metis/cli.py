@@ -29,8 +29,12 @@ def _provider_guard(fn):
         import openai
 
         from metis.client import ProviderError
+        from metis.index.store import EmbeddingModelMismatch
         try:
             return fn(*args, **kwargs)
+        except EmbeddingModelMismatch as e:
+            console.print(f"[red]✗ {e}[/red]")
+            raise typer.Exit(1)
         except (ProviderError, openai.OpenAIError) as e:
             console.print(f"[red]✗ {e}[/red]")
             if isinstance(e, openai.AuthenticationError) or "401" in str(e):
@@ -527,7 +531,12 @@ def _offer_expand(question: str, answer: str, config, note_path: str | None, sav
 
     # ingest and re-answer
     console.print("[dim]ingesting...[/dim]")
-    file_path, _ = ingest_external(best, config)
+    try:
+        file_path, _ = ingest_external(best, config)
+    except ValueError as e:
+        console.print(f"[red]✗ could not ingest that article: {e}[/red]")
+        _maybe_save_qa(note_path, question, answer, save)
+        return
     console.print(f"  saved: {file_path}")
 
     console.print("[dim]re-answering with new source...[/dim]\n")
@@ -672,6 +681,8 @@ def sync(
     console.print(f"  updated:   {report.updated} files")
     console.print(f"  deleted:   {report.deleted} files")
     console.print(f"  unchanged: {report.unchanged} files")
+    if report.skipped:
+        console.print(f"  [yellow]skipped:   {report.skipped} unreadable files[/yellow]")
     console.print()
     console.print(f"[bold green]✓ vault indexed.[/bold green] {report.total_files} files.")
 
@@ -970,6 +981,7 @@ def secret(
 
 
 @app.command()
+@_provider_guard
 def folders(
     edit: bool = typer.Option(False, "--edit", "-e", help="open folder descriptions in editor"),
 ):
