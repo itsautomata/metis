@@ -6,3 +6,4 @@ dist/
 build/
 .metis/
 local_docs
+.DS_Store
