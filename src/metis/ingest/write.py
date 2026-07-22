@@ -1,55 +1,48 @@
 """write processed content as markdown to the obsidian vault."""
 
-import json
 import re
 from datetime import date
 from pathlib import Path
 
 import yaml
 
-from metis.config import CONFIG_DIR, MetisConfig
+from metis import config as _cfg
+from metis.config import MetisConfig
 from metis.ingest.process import ProcessedContent
 
-SOURCES_INDEX_PATH = CONFIG_DIR / "sources.json"
+
+def _load_sources_index(config: MetisConfig) -> dict[str, str]:
+    """the source->path dedup index for this vault (config.migrate_state folds the legacy layout)."""
+    _cfg.migrate_state(config)
+    slice_ = _cfg.read_json(_cfg.SOURCES_INDEX_PATH).get(_cfg.vault_key(config.vault_path), {})
+    return slice_ if isinstance(slice_, dict) else {}
 
 
-def _load_sources_index() -> dict[str, str]:
-    """load the source->path dedup index, tolerating a missing or corrupt file."""
-    if not SOURCES_INDEX_PATH.exists():
-        return {}
-    try:
-        data = json.loads(SOURCES_INDEX_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {}
-    return data if isinstance(data, dict) else {}
+def _save_sources_index(index: dict[str, str], config: MetisConfig) -> None:
+    """persist this vault's slice, leaving other vaults' slices in the same file untouched."""
+    data = _cfg.read_json(_cfg.SOURCES_INDEX_PATH)
+    data[_cfg.vault_key(config.vault_path)] = index
+    _cfg.write_json(_cfg.SOURCES_INDEX_PATH, data)
 
 
-def _save_sources_index(index: dict[str, str]) -> None:
-    """persist the dedup index atomically so an interrupted write can't corrupt it."""
-    SOURCES_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = SOURCES_INDEX_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(index, indent=2))
-    tmp.replace(SOURCES_INDEX_PATH)
-
-
-def check_duplicate(source_link: str) -> Path | None:
-    """check if source was already ingested. returns existing path or None."""
-    index = _load_sources_index()
+def check_duplicate(source_link: str, config: MetisConfig) -> Path | None:
+    """check if source was already ingested into THIS vault. returns existing path or None."""
+    index = _load_sources_index(config)
     existing = index.get(source_link)
     if existing and Path(existing).exists():
         return Path(existing)
     # clean stale entry
     if existing:
         del index[source_link]
-        _save_sources_index(index)
+        _save_sources_index(index, config)
     return None
 
 
-def _register_source(source_link: str, file_path: Path) -> None:
-    """add source to the dedup index."""
-    index = _load_sources_index()
+def _register_source(source_link: str, file_path: Path, config: MetisConfig) -> None:
+    """add source to this vault's dedup index."""
+    index = _load_sources_index(config)
     index[source_link] = str(file_path)
-    _save_sources_index(index)
+    _save_sources_index(index, config)
 
 
 def slugify(title: str) -> str:
@@ -152,7 +145,7 @@ def write_to_vault(
 
     markdown = build_markdown(title, text, source_link, source_type, processed, extra=extra)
     file_path.write_text(markdown, encoding="utf-8")
-    _register_source(source_link, file_path)
+    _register_source(source_link, file_path, config)
 
     return file_path
 

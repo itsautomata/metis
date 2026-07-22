@@ -21,14 +21,16 @@ def _deterministic_console(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_metis_state(tmp_path, monkeypatch):
-    from metis import classify
-    from metis.index import canary, sync
+    from metis import config
+    from metis.index import canary
 
     state = tmp_path / "_metis_state"
     state.mkdir(exist_ok=True)
-    monkeypatch.setattr(sync, "SYNC_STATE_PATH", state / "sync_state.json")
+    # the vault-scoped sidecars now live on config (content-keyed by vault); the canary is global
+    monkeypatch.setattr(config, "SOURCES_INDEX_PATH", state / "sources.json")
+    monkeypatch.setattr(config, "SYNC_STATE_PATH", state / "sync_state.json")
+    monkeypatch.setattr(config, "CATEGORIZATION_PATH", state / "categorization.json")
     monkeypatch.setattr(canary, "CANARY_PATH", state / "canary.json")
-    monkeypatch.setattr(classify, "CATEGORIZATION_PATH", state / "categorization.json")
 
 
 @pytest.fixture(autouse=True)

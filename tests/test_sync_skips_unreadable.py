@@ -43,3 +43,18 @@ def test_sync_skips_unreadable_file(monkeypatch, tmp_path):
 
     assert report.skipped == 1
     assert report.added == 1
+
+
+def test_find_vault_files_skips_dot_dirs(tmp_path):
+    """.obsidian and .trash markdown is not indexed, so deleted notes don't resurface in search."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "live.md").write_text("live")
+    (vault / ".trash").mkdir()
+    (vault / ".trash" / "deleted.md").write_text("deleted note")
+    (vault / ".obsidian").mkdir()
+    (vault / ".obsidian" / "stray.md").write_text("plugin")
+    (vault / ".hidden.md").write_text("dotfile")
+
+    found = {p.name for p in sync._find_vault_files(_cfg(vault, tmp_path))}
+    assert found == {"live.md"}

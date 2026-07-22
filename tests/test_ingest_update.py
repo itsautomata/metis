@@ -29,7 +29,7 @@ def test_failed_embed_preserves_existing_note(tmp_path, monkeypatch):
     config, existing = _make_config(tmp_path)
     monkeypatch.setattr("metis.cli.load_config", lambda: config)
     # source already ingested -> enters the update branch
-    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src: existing)
+    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src, config: existing)
     monkeypatch.setattr("metis.index.sync._remove_file_from_index", lambda *a, **k: 0)
     monkeypatch.setattr(
         "metis.ingest.extract.extract",
@@ -55,7 +55,7 @@ def test_failed_extract_preserves_existing_note(tmp_path, monkeypatch):
     """extraction fails while updating (e.g. URL now dead): the old note stays."""
     config, existing = _make_config(tmp_path)
     monkeypatch.setattr("metis.cli.load_config", lambda: config)
-    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src: existing)
+    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src, config: existing)
     monkeypatch.setattr("metis.index.sync._remove_file_from_index", lambda *a, **k: 0)
 
     def _dead(*a, **k):
@@ -76,7 +76,7 @@ def test_dedup_keys_on_canonical_source_link(tmp_path, monkeypatch):
 
     seen = {}
 
-    def _record(src):
+    def _record(src, config):
         seen["arg"] = src
         return existing  # a duplicate; decline the update below to stop right here
 
@@ -96,7 +96,7 @@ def test_failed_update_embed_defers_index_removal(tmp_path, monkeypatch):
     """a failed embed during an update must not have removed the old note's vectors yet."""
     config, existing = _make_config(tmp_path)
     monkeypatch.setattr("metis.cli.load_config", lambda: config)
-    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src: existing)
+    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src, config: existing)
 
     removed = []
     monkeypatch.setattr("metis.index.sync._remove_file_from_index", lambda path, cfg: removed.append(path))
@@ -124,7 +124,7 @@ def test_successful_update_still_removes_old_vectors(tmp_path, monkeypatch):
     """on a successful update the old vectors are dropped (after embed) so nothing is orphaned."""
     config, existing = _make_config(tmp_path)
     monkeypatch.setattr("metis.cli.load_config", lambda: config)
-    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src: existing)
+    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src, config: existing)
 
     removed = []
     monkeypatch.setattr("metis.index.sync._remove_file_from_index", lambda path, cfg: removed.append(path))
@@ -139,7 +139,7 @@ def test_successful_update_still_removes_old_vectors(tmp_path, monkeypatch):
     monkeypatch.setattr("metis.index.embed.embed_texts", lambda chunks, cfg: [[0.1]])
     monkeypatch.setattr("metis.ingest.write.write_to_vault", lambda *a, **k: existing)
     monkeypatch.setattr("metis.index.store.store_chunks_with_embeddings", lambda *a, **k: 1)
-    monkeypatch.setattr("metis.index.sync.mark_file_synced", lambda p: None)
+    monkeypatch.setattr("metis.index.sync.mark_file_synced", lambda p, config: None)
 
     result = runner.invoke(app, ["ingest", "https://example.com", "--folder", "metis-ingested"], input="y\n")
 

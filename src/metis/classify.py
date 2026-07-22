@@ -8,19 +8,16 @@ the blend shifts from semantic (early, few notes) to KNN (later, many notes)
 as your vault grows.
 """
 
-import json
 from pathlib import Path
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
-from metis.config import CONFIG_DIR, MetisConfig, vault_folders
+from metis import config as _cfg
+from metis.config import MetisConfig, vault_folders
 from metis.index.embed import embed_texts
 from metis.index.store import get_collection, query_collection
 from metis.textio import read_note_text
-
-CATEGORIZATION_PATH = CONFIG_DIR / "categorization.json"
-
 
 # --- data storage ---
 
@@ -28,31 +25,30 @@ def _default_categorization() -> dict:
     return {"folder_descriptions": {}, "folder_embeddings": {}, "feedback": []}
 
 
-def _load_categorization() -> dict:
-    if not CATEGORIZATION_PATH.exists():
-        return _default_categorization()
-    try:
-        data = json.loads(CATEGORIZATION_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
-        # a truncated write (an interrupted save of this multi-MB file) must not brick ingest;
-        # fall back to defaults and let the next save rewrite it.
-        return _default_categorization()
-    return data if isinstance(data, dict) else _default_categorization()
+def _load_categorization(config: MetisConfig) -> dict:
+    """this vault's categorization slice: folder descriptions, embeddings, and feedback.
+
+    a truncated write (an interrupted save of this multi-MB file) falls back to defaults instead of
+    bricking ingest; the next save rewrites it.
+    """
+    _cfg.migrate_state(config)
+    slice_ = _cfg.read_json(_cfg.CATEGORIZATION_PATH).get(_cfg.vault_key(config.vault_path))
+    return slice_ if isinstance(slice_, dict) else _default_categorization()
 
 
-def _save_categorization(data: dict) -> None:
-    CATEGORIZATION_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CATEGORIZATION_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    tmp.replace(CATEGORIZATION_PATH)
+def _save_categorization(data: dict, config: MetisConfig) -> None:
+    """persist this vault's slice, leaving other vaults' slices in the same file untouched."""
+    all_data = _cfg.read_json(_cfg.CATEGORIZATION_PATH)
+    all_data[_cfg.vault_key(config.vault_path)] = data
+    _cfg.write_json(_cfg.CATEGORIZATION_PATH, all_data)
 
 
-def clear_folder_embeddings() -> None:
+def clear_folder_embeddings(config: MetisConfig) -> None:
     """drop cached folder embeddings so they recompute; called when the embedding model changes."""
-    data = _load_categorization()
+    data = _load_categorization(config)
     if data.get("folder_embeddings"):
         data["folder_embeddings"] = {}
-        _save_categorization(data)
+        _save_categorization(data, config)
 
 
 # --- folder descriptions ---
@@ -107,7 +103,7 @@ def get_folder_embeddings(config: MetisConfig) -> dict[str, list[float]]:
 
     uses cached embeddings if available, recomputes for new folders.
     """
-    data = _load_categorization()
+    data = _load_categorization(config)
     cached = data.get("folder_embeddings", {})
     descriptions = data.get("folder_descriptions", {})
 
@@ -134,7 +130,7 @@ def get_folder_embeddings(config: MetisConfig) -> dict[str, list[float]]:
     # save updated cache
     data["folder_embeddings"] = cached
     data["folder_descriptions"] = descriptions
-    _save_categorization(data)
+    _save_categorization(data, config)
 
     # return only current folders (prune deleted ones)
     return {f: cached[f] for f in folders if f in cached}
@@ -283,13 +279,13 @@ def suggest_folder(
 
 # --- feedback ---
 
-def record_feedback(note_path: str, suggested_folder: str, actual_folder: str) -> None:
+def record_feedback(note_path: str, suggested_folder: str, actual_folder: str, config: MetisConfig) -> None:
     """record whether the suggestion was accepted or overridden."""
-    data = _load_categorization()
+    data = _load_categorization(config)
     data.setdefault("feedback", []).append({
         "note": note_path,
         "suggested": suggested_folder,
         "actual": actual_folder,
         "accepted": suggested_folder == actual_folder,
     })
-    _save_categorization(data)
+    _save_categorization(data, config)

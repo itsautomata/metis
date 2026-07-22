@@ -1,8 +1,11 @@
 """connection discovery between vault notes."""
 
+import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 from metis.client import get_chat_model, get_client
 from metis.config import MetisConfig
@@ -21,16 +24,75 @@ class Connection:
 
 
 def _get_existing_links(file_path: Path) -> set[str]:
-    """find all [[wikilinks]] already in a file."""
+    """note names already linked, in either [[wikilink]] or [text](path.md) form, so dedup holds
+    across a link-style change."""
     if not file_path.exists():
         return set()
     text = read_note_text(file_path)
-    return set(re.findall(r"\[\[(.+?)\]\]", text))
+    names: set[str] = set()
+    # wikilinks carry aliases ([[note|alias]]), headings ([[note#h]]), and paths ([[dir/note]]);
+    # reduce each to the bare note name so dedup (which keys on the target stem) still matches.
+    for inner in re.findall(r"\[\[(.+?)\]\]", text):
+        note = inner.split("|", 1)[0].split("#", 1)[0].strip()
+        names.add(note)
+        names.add(Path(note).stem)
+    # markdown links to local .md, in either bare or percent-encoded form
+    for label, target in re.findall(r"(?<!!)\[([^\]]+)\]\(<?([^)>]+\.md)>?\)", text):
+        names.add(label)
+        names.add(Path(unquote(target)).stem)
+    return names
 
 
 def _note_name(file_path: str) -> str:
     """extract note name from path (filename without extension)."""
     return Path(file_path).stem
+
+
+def detect_link_style(vault_path: Path) -> str:
+    """read the notes app's own marker to pick link syntax; only obsidian records a preference.
+
+    obsidian carries a real wikilink-vs-markdown toggle (app.json useMarkdownLinks); logseq,
+    dendron, and foam are wikilink-native, so the marker's presence is the answer. a folder with
+    no marker is a plain vault, defaulting to markdown links that render anywhere.
+    """
+    obsidian = vault_path / ".obsidian"
+    if obsidian.is_dir():
+        app_json = obsidian / "app.json"
+        if app_json.is_file():
+            try:
+                if json.loads(app_json.read_text()).get("useMarkdownLinks"):
+                    return "markdown"
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                pass
+        return "wikilink"
+    if (vault_path / "logseq" / "config.edn").is_file():
+        return "wikilink"
+    if (vault_path / "dendron.yml").is_file():
+        return "wikilink"
+    if (vault_path / ".foam").is_dir() or (vault_path / "foam.json").is_file():
+        return "wikilink"
+    return "markdown"
+
+
+def resolve_link_style(config: MetisConfig) -> str:
+    """the configured link style if set, else auto-detected from the vault's notes app."""
+    return config.link_style or detect_link_style(config.vault_path)
+
+
+def _format_link(target_fp: str, source_path: Path, style: str, vault_path: Path, ambiguous: set[str]) -> str:
+    name = _note_name(target_fp)
+    if style == "markdown":
+        # obsidian's markdown links percent-encode the destination (spaces -> %20, parens escaped)
+        rel = os.path.relpath(target_fp, source_path.parent)
+        return f"[{name}]({quote(rel, safe='/')})"
+    # a bare [[stem]] mis-resolves when two notes share the stem; qualify with the vault-relative
+    # path so obsidian links the intended note.
+    if name in ambiguous:
+        try:
+            return f"[[{str(Path(target_fp).relative_to(vault_path)).removesuffix('.md')}]]"
+        except ValueError:
+            pass
+    return f"[[{name}]]"
 
 
 def find_connections(
@@ -185,8 +247,19 @@ def _mask_code_fences(text: str) -> str:
     return "".join(out)
 
 
-def write_links(connections: list[Connection]) -> int:
-    """write [[wikilinks]] into source notes. returns count of links written."""
+def write_links(connections: list[Connection], config: MetisConfig) -> int:
+    """write connection backlinks into source notes, in the vault's link style. returns count."""
+    from collections import Counter
+
+    style = resolve_link_style(config)
+    vault = config.vault_path
+    # a wikilink [[review]] is ambiguous when two notes share the stem; find those to path-qualify.
+    stems = Counter(
+        p.stem for p in vault.rglob("*.md")
+        if not any(part.startswith(".") for part in p.relative_to(vault).parts)
+    ) if vault.exists() else Counter()
+    ambiguous = {s for s, n in stems.items() if n > 1}
+
     written = 0
 
     # group by source
@@ -204,8 +277,7 @@ def write_links(connections: list[Connection]) -> int:
 
         links_section = "\n\n## Connections\n\n"
         for c in conns:
-            target_name = _note_name(c.target)
-            links_section += f"- [[{target_name}]] [{c.score}]\n"
+            links_section += f"- {_format_link(c.target, path, style, vault, ambiguous)} [{c.score}]\n"
 
         # replace an existing Connections section, else insert before Transcript/Content, else append
         conn_match = re.search(r"\n*## Connections\b.*?(?=\n## |\Z)", masked, flags=re.DOTALL)

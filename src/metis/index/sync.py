@@ -1,19 +1,17 @@
 """vault sync: re-index changed, new, and deleted files."""
 
 import hashlib
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import chromadb
 
-from metis.config import CONFIG_DIR, MetisConfig
+from metis import config as _cfg
+from metis.config import MetisConfig
 from metis.index.store import get_collection, store_chunks
 from metis.ingest.process import chunk_text
 from metis.textio import read_note_text
-
-SYNC_STATE_PATH = CONFIG_DIR / "sync_state.json"
 
 
 @dataclass
@@ -32,41 +30,43 @@ def _file_hash(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
-def _load_sync_state() -> dict[str, str]:
-    """load previous sync state: {file_path: hash}. tolerates a missing or corrupt file.
-    """
-    if not SYNC_STATE_PATH.exists():
-        return {}
-    try:
-        data = json.loads(SYNC_STATE_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {}
-    return data if isinstance(data, dict) else {}
+def _load_sync_state(config: MetisConfig) -> dict[str, str]:
+    """this vault's sync state: {file_path: hash}. tolerates a missing or corrupt file."""
+    _cfg.migrate_state(config)
+    slice_ = _cfg.read_json(_cfg.SYNC_STATE_PATH).get(_cfg.vault_key(config.vault_path), {})
+    return slice_ if isinstance(slice_, dict) else {}
 
 
-def _save_sync_state(state: dict[str, str]) -> None:
-    """persist sync state atomically so an interrupted write can't corrupt it."""
-    SYNC_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = SYNC_STATE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2))
-    tmp.replace(SYNC_STATE_PATH)
+def _save_sync_state(state: dict[str, str], config: MetisConfig) -> None:
+    """persist this vault's slice, leaving other vaults' slices in the same file untouched."""
+    data = _cfg.read_json(_cfg.SYNC_STATE_PATH)
+    data[_cfg.vault_key(config.vault_path)] = state
+    _cfg.write_json(_cfg.SYNC_STATE_PATH, data)
 
 
-def mark_file_synced(file_path: Path) -> None:
+def mark_file_synced(file_path: Path, config: MetisConfig) -> None:
     """record a file's current content hash in the sync state.
 
     ingest calls this after storing a note so a later `metis sync` treats it as
-    already indexed instead of re-embedding it. an edit in obsidian changes the
-    hash, so sync still re-embeds edited notes.
+    already indexed instead of re-embedding it. an edit changes the hash, so sync
+    still re-embeds edited notes.
     """
-    state = _load_sync_state()
+    state = _load_sync_state(config)
     state[str(file_path)] = _file_hash(file_path)
-    _save_sync_state(state)
+    _save_sync_state(state, config)
 
 
 def _find_vault_files(config: MetisConfig) -> list[Path]:
-    """find all markdown files in the vault."""
-    return sorted(config.vault_path.rglob("*.md"))
+    """markdown files in the vault, skipping dot-directories (.obsidian, .trash) and dotfiles.
+
+    a bare rglob would index Obsidian's deleted notes (.trash) and stray .md under .obsidian,
+    resurfacing them in search and chat.
+    """
+    vault = config.vault_path
+    return sorted(
+        p for p in vault.rglob("*.md")
+        if not any(part.startswith(".") for part in p.relative_to(vault).parts)
+    )
 
 
 def _remove_file_from_index(file_path: str, config: MetisConfig) -> int:
@@ -106,7 +106,7 @@ def sync_vault(
     file is processed, so a caller can render progress.
     """
     report = SyncReport()
-    old_state = _load_sync_state()
+    old_state = _load_sync_state(config)
     new_state = {}
 
     vault_files = _find_vault_files(config)
@@ -183,7 +183,7 @@ def sync_vault(
             report.deleted += 1
 
     report.total_files = len(vault_files)
-    _save_sync_state(new_state)
+    _save_sync_state(new_state, config)
 
     # baseline the drift canary for any non-empty index (idempotent; also covers a pre-existing
     # index whose sync is a no-op and would otherwise never get a baseline)
@@ -201,19 +201,18 @@ def reindex_vault(config: MetisConfig) -> SyncReport:
     so everything must be rebuilt. also drops state tied to the old space.
     """
     from metis.classify import clear_folder_embeddings
-    from metis.index.store import COLLECTION_NAME
+    from metis.index.store import collection_name
 
-    # drop the collection so its embedding-model stamp resets to the current model
+    # drop this vault's collection so its embedding-model stamp resets to the current model
     client = chromadb.PersistentClient(path=str(config.chromadb_path))
     try:
-        client.delete_collection(COLLECTION_NAME)
+        client.delete_collection(collection_name(config))
     except Exception:
         pass  # nothing to drop on a fresh vault
 
-    # forget sync state so every file re-embeds; drop the folder-embedding cache (old space)
-    if SYNC_STATE_PATH.exists():
-        SYNC_STATE_PATH.unlink()
-    clear_folder_embeddings()
+    # forget this vault's sync state so every file re-embeds; drop the folder-embedding cache
+    _save_sync_state({}, config)
+    clear_folder_embeddings(config)
     # drop the drift baseline; sync_vault below re-captures it against the new model
     from metis.index.canary import reset as reset_canary
     reset_canary()

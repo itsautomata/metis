@@ -19,7 +19,7 @@ def test_batch_cancel_falls_to_default_not_previous_folder(tmp_path, monkeypatch
         chromadb_path=tmp_path / "chromadb",
     )
     monkeypatch.setattr("metis.cli.load_config", lambda: config)
-    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src: None)
+    monkeypatch.setattr("metis.ingest.write.check_duplicate", lambda src, config: None)
     monkeypatch.setattr(
         "metis.ingest.extract.extract",
         lambda source, **k: (source, "body text here", "url", source, None),

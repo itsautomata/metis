@@ -34,7 +34,7 @@ def test_stamp_persists_and_mismatch_raises(tmp_path):
 def test_unstamped_collection_treated_as_default(tmp_path):
     (tmp_path / "cdb").mkdir()
     client = chromadb.PersistentClient(path=str(tmp_path / "cdb"))
-    coll = client.get_or_create_collection(name=store.COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
+    coll = client.get_or_create_collection(name=store.LEGACY_COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
     assert store.indexed_embedding_model(coll) == "text-embedding-3-small"
 
 
@@ -43,8 +43,6 @@ def test_reindex_restamps_and_reembeds(tmp_path, monkeypatch):
     vault.mkdir()
     (vault / "a.md").write_text("# a\n\ncontent")
     monkeypatch.setattr(store, "embed_texts", lambda texts, config: [[0.1, 0.2, 0.3] for _ in texts])
-    monkeypatch.setattr(sync, "SYNC_STATE_PATH", tmp_path / "sync_state.json")
-    monkeypatch.setattr("metis.classify.CATEGORIZATION_PATH", tmp_path / "cat.json")
 
     sync.sync_vault(_cfg(tmp_path, "text-embedding-3-small"))
     cfg_large = _cfg(tmp_path, "text-embedding-3-large")

@@ -45,8 +45,11 @@ def test_embed_error_no_hint_without_base_url(monkeypatch):
 
 
 def test_provider_guard_reports_cleanly_no_traceback(monkeypatch):
+    from types import SimpleNamespace
     monkeypatch.setattr("metis.cli.load_config", lambda: MetisConfig())
     monkeypatch.setattr("metis.cli._ensure_index_model", lambda c: True)
+    # a non-empty index so search reaches the (failing) embed call, without touching real chromadb
+    monkeypatch.setattr("metis.search.get_collection", lambda c: SimpleNamespace(count=lambda: 1))
     monkeypatch.setattr("metis.search.embed_texts", _not_found)
 
     result = runner.invoke(app, ["search", "hello"])

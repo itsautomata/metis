@@ -7,10 +7,16 @@ import chromadb
 from chromadb.errors import InvalidArgumentError
 
 from metis.client import get_embedding_model
-from metis.config import MetisConfig
+from metis.config import MetisConfig, legacy_owned_by, vault_key
 from metis.index.embed import embed_texts
 
-COLLECTION_NAME = "metis_vault"
+# the pre-per-vault collection name; kept only to adopt an existing index into its vault's collection
+LEGACY_COLLECTION_NAME = "metis_vault"
+
+
+def collection_name(config: MetisConfig) -> str:
+    """the vault's chromadb collection, so each vault's vectors stay disjoint in one shared db."""
+    return f"metis_{vault_key(config.vault_path)}"
 
 # the model every pre-stamp index was built with; used when a collection carries no stamp.
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -31,11 +37,16 @@ class EmbeddingModelMismatch(Exception):
 def get_collection(config: MetisConfig) -> chromadb.Collection:
     config.chromadb_path.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(config.chromadb_path))
+    name = collection_name(config)
+    existing = {c.name for c in client.list_collections()}
+    # one-time: adopt the pre-per-vault 'metis_vault' collection for the vault that owns it
+    if name not in existing and LEGACY_COLLECTION_NAME in existing and legacy_owned_by(config):
+        client.get_collection(LEGACY_COLLECTION_NAME).modify(name=name)
     # the embedding model is stamped at the first write (store_*), not here: a read command
     # run before the first ingest would otherwise stamp an empty index with the current model
     # and hide a later model switch.
     return client.get_or_create_collection(
-        name=COLLECTION_NAME,
+        name=name,
         metadata={"hnsw:space": "cosine"},
     )
 

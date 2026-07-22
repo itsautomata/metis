@@ -1,4 +1,4 @@
-"""metis CLI: second brain that pairs with obsidian."""
+"""metis CLI: second brain for your markdown notes."""
 
 import functools
 from pathlib import Path
@@ -16,7 +16,7 @@ typer.rich_utils.STYLE_COMMANDS_TABLE_FIRST_COLUMN = "bold magenta"
 
 app = typer.Typer(
     name="metis",
-    help="CLI second brain that pairs with Obsidian.",
+    help="CLI second brain for your markdown notes.",
     no_args_is_help=True,
 )
 console = Console()
@@ -185,7 +185,7 @@ def ingest(
         console.print(f"  chars: {len(text):,}")
 
         # check for duplicate, keyed on the canonical source_link that write_to_vault registers
-        existing = check_duplicate(source_link)
+        existing = check_duplicate(source_link, config)
         replace_path: Optional[Path] = None
         if existing:
             console.print(f"[yellow]! already ingested:[/yellow] {existing.name}")
@@ -225,7 +225,7 @@ def ingest(
                     resolved = (config.vault_path / chosen).resolve()
                     if resolved.is_relative_to(config.vault_path.resolve()):
                         config.output_folder = chosen
-                        record_feedback(source, top_folder, chosen)
+                        record_feedback(source, top_folder, chosen, config)
                     else:
                         console.print(f"[red]✗ folder must be inside the vault: {chosen}. using default.[/red]")
 
@@ -248,7 +248,7 @@ def ingest(
         console.print(f"  indexed: {n} chunks")
 
         # record the note in sync state so a later `metis sync` won't re-embed it
-        mark_file_synced(file_path)
+        mark_file_synced(file_path, config)
         # baseline the drift canary once the first vectors for this model have landed
         ensure_baseline(config)
 
@@ -566,7 +566,12 @@ def link(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="explain why notes are connected"),
 ):
     """surface connections between notes."""
-    from metis.link import explain_connection, find_connections, write_links
+    from metis.link import (
+        explain_connection,
+        find_connections,
+        resolve_link_style,
+        write_links,
+    )
 
     config = load_config()
     if not _ensure_index_model(config):
@@ -611,11 +616,14 @@ def link(
 
     console.print(f"\n{len(connections)} connections found.")
 
+    style = resolve_link_style(config)
     if write:
-        n = write_links(connections)
-        console.print(f"[bold green]✓ {n} wikilinks written.[/bold green]")
+        n = write_links(connections, config)
+        label = "wikilinks" if style == "wikilink" else "markdown links"
+        console.print(f"[bold green]✓ {n} {label} written.[/bold green]")
     else:
-        console.print("[dim]use --write to add [[wikilinks]] to your notes.[/dim]")
+        example = "[[wikilinks]]" if style == "wikilink" else "[markdown](links)"
+        console.print(f"[dim]use --write to add {example} to your notes.[/dim]")
 
 
 @app.command()
@@ -725,12 +733,12 @@ def init():
 
 
 def _complete_config_keys(incomplete: str) -> list[str]:
-    return [k for k in ["vault", "folder"] if k.startswith(incomplete)]
+    return [k for k in ["vault", "folder", "link-style"] if k.startswith(incomplete)]
 
 
 @app.command(name="config")
 def config_cmd(
-    key: Optional[str] = typer.Argument(None, help="setting: vault, folder", autocompletion=_complete_config_keys),
+    key: Optional[str] = typer.Argument(None, help="setting: vault, folder, link-style", autocompletion=_complete_config_keys),
     value: Optional[str] = typer.Argument(None, help="new value"),
 ):
     """view or change metis settings."""
@@ -746,14 +754,18 @@ def config_cmd(
     config_keys = {
         "vault": "vault_path",
         "folder": "output_folder",
+        "link-style": "link_style",
     }
 
     # no args: show current settings
     if not key:
+        from metis.link import resolve_link_style
+
         config = load_config()
         console.print(f"  vault:    {config.vault_path}")
         console.print(f"  folder:   {config.output_folder}")
         console.print(f"  base_url: {config.openai.base_url or 'default (openai)'}")
+        console.print(f"  links:    {resolve_link_style(config)}{' (forced)' if config.link_style else ' (auto)'}")
         console.print(f"\n[dim]{CONFIG_PATH}[/dim]")
         return
 
@@ -769,7 +781,16 @@ def config_cmd(
 
     # set value
     yaml_key = config_keys[key]
-    raw[yaml_key] = value
+    if key == "link-style":
+        if value not in ("wikilink", "markdown", "auto"):
+            console.print(f"[red]✗ link-style must be wikilink, markdown, or auto (got: {value})[/red]")
+            return
+        if value == "auto":
+            raw.pop(yaml_key, None)  # clear so it auto-detects from the vault's notes app
+        else:
+            raw[yaml_key] = value
+    else:
+        raw[yaml_key] = value
     with open(CONFIG_PATH, "w") as f:
         yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
 
@@ -1005,7 +1026,7 @@ def folders(
         console.print("[yellow]! no folders in vault.[/yellow]")
         return
 
-    data = _load_categorization()
+    data = _load_categorization(config)
     descriptions = data.get("folder_descriptions", {})
 
     # ensure all folders have descriptions
@@ -1013,7 +1034,7 @@ def folders(
         if f not in descriptions:
             descriptions[f] = _auto_describe_folder(f, config)
     data["folder_descriptions"] = descriptions
-    _save_categorization(data)
+    _save_categorization(data, config)
 
     if edit:
         # write descriptions to temp file, open in editor
@@ -1058,7 +1079,7 @@ def folders(
                 changed.append(f)
 
         data["folder_descriptions"] = descriptions
-        _save_categorization(data)
+        _save_categorization(data, config)
 
         if changed:
             console.print(f"[dim]re-embedding {len(changed)} updated folders...[/dim]")
