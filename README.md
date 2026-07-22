@@ -1,10 +1,10 @@
 
 <p align="center">
-  <img src="assets/metis_draft.gif" alt="metis" width="330">
+  <img src="https://raw.githubusercontent.com/itsautomata/metis/main/assets/metis_draft.gif" alt="metis" width="330">
 </p>
 
 ## metis
-a cli second brain that pairs with obsidian.
+a cli second brain for your markdown notes: [obsidian](https://obsidian.md/download) (recommended), an alternative, or just a normal folder.
 
 ingest anything. search by meaning. chat with your knowledge. discover connections.
 
@@ -12,23 +12,48 @@ ingest anything. search by meaning. chat with your knowledge. discover connectio
 
 ## setup
 
+### install
+
+**uv (recommended).** installs metis in its own isolated environment, so no dependency is missing and nothing collides with your other packages.
+
+```bash
+uv tool install metis-brain   # no uv? run: curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**pip.** 
+requires python 3.10+. it installs into your current environment, so isolate it. easiest is pipx (isolated, no venv to manage):
+
+```bash
+pipx install metis-brain
+```
+
+or a manual virtualenv:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate     # windows: .venv\Scripts\activate
+pip install metis-brain
+```
+
+> a venv-installed `metis` only works while that venv is active. pipx and `uv tool install` avoid this: isolated and always on your PATH.
+
+**git (for development):**
+
 ```bash
 git clone https://github.com/itsautomata/metis
 cd metis
+uv tool install -e .             # global
+uv tool install -e . --force     # update the global install
+# or in a virtualenv:
+uv venv && source .venv/bin/activate && uv pip install -e "."
+```
 
-# option a: install globally (use metis from anywhere)
-uv tool install -e .
-# to update global install
-uv tool install -e . --force
+then set up, whichever way you installed:
 
-# option b: install in virtual env (for development)
-uv venv
-source .venv/bin/activate
-uv pip install -e "."
-
+```bash
 metis init
 metis --install-completion  # enable tab completion for commands
-exec $SHELL                # restart shell to apply
+exec $SHELL                 # restart shell to apply
 ```
 
 store your api keys securely:
@@ -43,6 +68,23 @@ metis models                   # show the chat + embedding models (and provider)
 ```
 
 quick changes via `metis config vault <path>`. for everything else, edit `~/.metis/config.yaml`.
+
+### upgrade
+
+```bash
+uv tool upgrade metis-brain               # installed with uv
+pipx upgrade metis-brain                  # installed with pipx
+pip install --upgrade metis-brain         # installed with pip
+git pull && uv tool install -e . --force  # dev / git clone
+```
+
+### uninstall
+
+```bash
+uv tool uninstall metis-brain     # installed with uv (or the editable/dev install)
+pipx uninstall metis-brain        # installed with pipx
+pip uninstall metis-brain         # installed with pip, inside the venv
+```
 
 ---
 
@@ -103,7 +145,7 @@ metis link --write
 metis link --verbose
 ```
 
-discovers connections between notes. `--write` adds `[[wikilinks]]` to the files. `--verbose` explains why notes are connected.
+discovers connections between notes. `--write` adds links in your vault's style, auto-detected: `[[wikilinks]]` for obsidian and similar apps, `[markdown](links)` for a plain folder (override with `metis config link-style`). `--verbose` explains why notes are connected.
 
 > interactive: `--pick` (choose vault note to find connections for)
 
@@ -115,7 +157,7 @@ discovers connections between notes. `--write` adds `[[wikilinks]]` to the files
 metis sync
 ```
 
-re-indexes the vault after you edit notes in obsidian.
+re-indexes the vault after you edit notes.
 
 ---
 
@@ -165,6 +207,7 @@ list folders with their ML descriptions. `--edit` opens in your editor to refine
 metis config                       # show current settings
 metis config vault ~/obsidian/my-vault
 metis config folder metis-ingested
+metis config link-style wikilink   # or markdown, or auto (default: detect from the vault)
 ```
 
 for anything not covered above, edit `~/.metis/config.yaml`:
