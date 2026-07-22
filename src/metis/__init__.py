@@ -1,3 +1,3 @@
-"""metis — CLI second brain that pairs with Obsidian."""
+"""metis: CLI second brain for your markdown notes."""
 
 __version__ = "0.1.0"
