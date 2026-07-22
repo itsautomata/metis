@@ -22,6 +22,14 @@ STYLE = Style([
 ])
 
 
+def _ask(question):
+    """run a prompt, treating Ctrl-D (EOFError) as a cancel, the way questionary already treats Ctrl-C."""
+    try:
+        return question.ask()
+    except EOFError:
+        return None
+
+
 def pick_note(config: MetisConfig) -> str | None:
     """interactive note picker. returns relative path or None if cancelled."""
     vault = config.vault_path
@@ -37,12 +45,12 @@ def pick_note(config: MetisConfig) -> str | None:
     if not notes:
         return None
 
-    choice = questionary.autocomplete(
+    choice = _ask(questionary.autocomplete(
         "note:",
         choices=notes,
         match_middle=True,
         style=STYLE,
-    ).ask()
+    ))
 
     return choice
 
@@ -53,12 +61,12 @@ def pick_folder(config: MetisConfig) -> str | None:
     if not folders:
         return None
 
-    return questionary.autocomplete(
+    return _ask(questionary.autocomplete(
         "folder:",
         choices=folders,
         match_middle=True,
         style=STYLE,
-    ).ask()
+    ))
 
 
 _PICK_EXISTING = object()
@@ -77,24 +85,24 @@ def pick_suggested_folder(suggestions: list[tuple[str, float]], config: MetisCon
     choices.append(questionary.Choice(title="pick an existing folder…", value=_PICK_EXISTING))
     choices.append(questionary.Choice(title="type a new folder name…", value=_NEW_FOLDER))
 
-    choice = questionary.select(
+    choice = _ask(questionary.select(
         "folder:",
         choices=choices,
         style=STYLE,
-    ).ask()
+    ))
 
     if choice is _PICK_EXISTING:
         folders = vault_folders(config)
         if not folders:
             return None
-        return questionary.select(
+        return _ask(questionary.select(
             "existing folder:",
             choices=folders,
             style=STYLE,
-        ).ask()
+        ))
 
     if choice is _NEW_FOLDER:
-        name = questionary.text("new folder name:", style=STYLE).ask()
+        name = _ask(questionary.text("new folder name:", style=STYLE))
         return name.strip() if name and name.strip() else None
 
     return choice
@@ -120,22 +128,22 @@ def pick_search_result(results: list, config: MetisConfig) -> str | None:
 
     choices.append(questionary.Choice(title="skip", value=None))
 
-    choice = questionary.select(
+    choice = _ask(questionary.select(
         "results:",
         choices=choices,
         style=STYLE,
-    ).ask()
+    ))
 
     return choice
 
 
 def pick_secret(key_names: list[str]) -> str | None:
     """interactive secret key picker."""
-    choice = questionary.select(
+    choice = _ask(questionary.select(
         "key:",
         choices=key_names,
         style=STYLE,
-    ).ask()
+    ))
 
     return choice
 
@@ -155,10 +163,10 @@ def pick_wikipedia(results: list[tuple[str, str]]) -> str | None:
 
     choices.append(questionary.Choice(title="skip", value=None))
 
-    choice = questionary.select(
+    choice = _ask(questionary.select(
         "article:",
         choices=choices,
         style=STYLE,
-    ).ask()
+    ))
 
     return choice
