@@ -7,7 +7,7 @@ from pathlib import Path
 from metis.client import get_chat_model, get_client
 from metis.config import MetisConfig
 from metis.index.embed import embed_texts
-from metis.index.store import get_collection
+from metis.index.store import get_collection, query_collection
 from metis.textio import read_note_text
 
 
@@ -83,7 +83,9 @@ def find_connections(
 
         n_results = min(limit + len(existing_links) + 1, collection.count())
 
-        results = collection.query(
+        results = query_collection(
+            collection,
+            config,
             query_embeddings=[query_embedding],
             n_results=n_results,
         )
@@ -162,6 +164,8 @@ def explain_connection(connection: Connection, config: MetisConfig) -> str:
         temperature=0.3,
     )
 
+    if not response.choices:
+        return ""
     return (response.choices[0].message.content or "").strip()
 
 

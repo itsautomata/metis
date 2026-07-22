@@ -46,6 +46,8 @@ def extract_search_keywords(question: str, config: MetisConfig) -> str:
         temperature=0.1,
     )
 
+    if not response.choices:
+        return ""
     return (response.choices[0].message.content or "").strip()
 
 

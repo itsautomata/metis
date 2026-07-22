@@ -123,6 +123,9 @@ def ask(
             temperature=0.3,
         )
 
+        if not response.choices:
+            answer = "the model returned no response. try again or rephrase the question."
+            break
         answer = (response.choices[0].message.content or "").strip()
         break
 
