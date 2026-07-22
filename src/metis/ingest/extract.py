@@ -300,8 +300,11 @@ def extract_from_pdf_url(url: str) -> tuple[str, str]:
     """download PDF from URL, extract text, delete temp file. returns (title, text)."""
     import tempfile
 
-    response = _safe_get(url, timeout=60)
-    response.raise_for_status()
+    try:
+        response = _safe_get(url, timeout=60)
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        raise ValueError(f"could not fetch PDF: {e}") from e
 
     # verify we actually got a PDF, not an HTML redirect or error page
     content_type = response.headers.get("content-type", "")
@@ -355,8 +358,11 @@ def extract_from_arxiv(url: str) -> tuple[str, str]:
     pdf_url = _arxiv_to_pdf_url(url)
 
     # download the PDF
-    response = _safe_get(pdf_url, timeout=60)
-    response.raise_for_status()
+    try:
+        response = _safe_get(pdf_url, timeout=60)
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        raise ValueError(f"could not fetch arxiv paper: {e}") from e
 
     # write to temp file and extract with pymupdf
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
