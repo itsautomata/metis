@@ -20,7 +20,7 @@ ingest anything. search by meaning. chat with your knowledge. discover connectio
 uv tool install metis-brain   # no uv? run: curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-**pip.** 
+**pip**
 requires python 3.10+. it installs into your current environment, so isolate it. easiest is pipx (isolated, no venv to manage):
 
 ```bash
@@ -51,12 +51,14 @@ uv venv && source .venv/bin/activate && uv pip install -e "."
 then set up, whichever way you installed:
 
 ```bash
-metis init
+metis init                  # guided: vault, provider, key, and models in one flow
 metis --install-completion  # enable tab completion for commands
 exec $SHELL                 # restart shell to apply
 ```
 
-store your api keys securely:
+`metis init` runs a guided wizard; `metis --no-input init` / `metis --yes init` write defaults for CI.
+
+prefer to set things by hand:
 
 ```bash
 metis secret set provider-key  # your one key (works for any provider via base_url)
@@ -90,7 +92,11 @@ pip uninstall metis-brain         # installed with pip, inside the venv
 
 ## commands
 
-run `metis --help` or `metis <command> --help` for all options.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/itsautomata/metis/main/assets/metis_op.png" alt="metis splash: the four commands to start" width="520">
+</p>
+
+run `metis --help` or `metis <command> --help` for all options. `--yes` / `--no-input` make any command non-interactive for scripts and CI; `METIS_ACCESSIBLE=1` swaps the arrow-key menus for numbered prompts (screen readers, no-arrow terminals).
 
 ### ingest
 
@@ -118,7 +124,7 @@ accepts one source or many at once. supports pdfs, urls, markdown, arxiv papers,
 metis search "what role did titans play in greek mythos"
 ```
 
-semantic search. finds by meaning, not keywords. pick a result to chat about it.
+semantic search. finds by meaning, not keywords. pick a result to chat about it. add `--json` for machine-readable output (also on `metis doctor`).
 
 ---
 
@@ -165,11 +171,13 @@ re-indexes the vault after you edit notes.
 
 ```bash
 metis reindex
+metis reindex --dry-run   # preview: how many notes would re-embed, no api calls
 ```
 
 rebuilds the whole vector index from scratch. run it after changing your
 `embedding_model`: the old vectors live in a different space, so metis refuses
-search/link/health until you reindex.
+search/link/health until you reindex. `--dry-run` reports how many notes would be
+re-embedded (one call per chunk) without spending anything.
 
 ---
 
