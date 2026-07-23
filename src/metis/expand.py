@@ -11,7 +11,7 @@ from metis.config import MetisConfig
 from metis.index.store import store_chunks
 from metis.ingest.extract import extract
 from metis.ingest.process import process
-from metis.ingest.write import write_to_vault
+from metis.ingest.write import check_duplicate, write_to_vault
 
 
 @dataclass
@@ -91,6 +91,10 @@ def ingest_external(result: ExternalResult, config: MetisConfig) -> tuple[Path, 
 
     auto-organizes by source type: wikipedia/.
     """
+    existing = check_duplicate(result.url, config)
+    if existing:
+        return existing, existing.read_text(encoding="utf-8", errors="ignore")
+
     original_folder = config.output_folder
     config.output_folder = result.source_type
 
