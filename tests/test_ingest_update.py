@@ -44,7 +44,7 @@ def test_failed_embed_preserves_existing_note(tmp_path, monkeypatch):
         raise RuntimeError("openai down")
     monkeypatch.setattr("metis.index.embed.embed_texts", _boom)
 
-    result = runner.invoke(app, ["ingest", "https://example.com"], input="y\n")
+    result = runner.invoke(app, ["--yes", "ingest", "https://example.com"])
 
     assert result.exit_code == 0
     assert existing.exists(), "existing note was destroyed by a failed update"
@@ -62,7 +62,7 @@ def test_failed_extract_preserves_existing_note(tmp_path, monkeypatch):
         raise ValueError("could not extract text from: https://example.com")
     monkeypatch.setattr("metis.ingest.extract.extract", _dead)
 
-    result = runner.invoke(app, ["ingest", "https://example.com"], input="y\n")
+    result = runner.invoke(app, ["--yes", "ingest", "https://example.com"])
 
     assert result.exit_code == 0
     assert existing.exists(), "existing note was destroyed by a failed update"
@@ -113,7 +113,7 @@ def test_failed_update_embed_defers_index_removal(tmp_path, monkeypatch):
         raise RuntimeError("openai down")
     monkeypatch.setattr("metis.index.embed.embed_texts", _boom)
 
-    result = runner.invoke(app, ["ingest", "https://example.com"], input="y\n")
+    result = runner.invoke(app, ["--yes", "ingest", "https://example.com"])
 
     assert result.exit_code == 0
     assert removed == [], "old vectors were removed before embed succeeded"
@@ -141,7 +141,7 @@ def test_successful_update_still_removes_old_vectors(tmp_path, monkeypatch):
     monkeypatch.setattr("metis.index.store.store_chunks_with_embeddings", lambda *a, **k: 1)
     monkeypatch.setattr("metis.index.sync.mark_file_synced", lambda p, config: None)
 
-    result = runner.invoke(app, ["ingest", "https://example.com", "--folder", "metis-ingested"], input="y\n")
+    result = runner.invoke(app, ["--yes", "ingest", "https://example.com", "--folder", "metis-ingested"])
 
     assert result.exit_code == 0
     assert removed == [str(existing)], f"old vectors not removed on a successful update: {removed}"

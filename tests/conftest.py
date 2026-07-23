@@ -15,8 +15,9 @@ def _deterministic_console(monkeypatch):
     from rich.console import Console
 
     from metis import cli
+    from metis.ui import THEME
 
-    monkeypatch.setattr(cli, "console", Console(width=200, highlight=False))
+    monkeypatch.setattr(cli, "console", Console(width=200, highlight=False, theme=THEME))
 
 
 @pytest.fixture(autouse=True)

@@ -58,3 +58,19 @@ def test_provider_guard_reports_cleanly_no_traceback(monkeypatch):
     assert "Traceback" not in result.output
     assert "moonshotai/kimi-k2.6" in result.output
     assert "check the model id" in result.output
+
+
+def test_diagnostics_go_to_stderr_not_stdout(monkeypatch):
+    """errors and hints must land on stderr, so `search ... 2>/dev/null | ...` stays clean."""
+    from types import SimpleNamespace
+    monkeypatch.setattr("metis.cli.load_config", lambda: MetisConfig())
+    monkeypatch.setattr("metis.cli._ensure_index_model", lambda c: True)
+    monkeypatch.setattr("metis.search.get_collection", lambda c: SimpleNamespace(count=lambda: 1))
+    monkeypatch.setattr("metis.search.embed_texts", _not_found)
+
+    result = runner.invoke(app, ["search", "hello"])
+
+    assert result.exit_code == 1
+    assert "✗" in result.stderr
+    assert "check the model id" in result.stderr
+    assert "✗" not in result.stdout

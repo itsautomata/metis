@@ -83,8 +83,10 @@ def ensure_baseline(config: MetisConfig) -> None:
     try:
         vectors = embed.embed_texts(CANARY_TEXTS, config)
     except Exception as e:  # best-effort: a provider/key error must not break the ingest
-        from rich.console import Console
-        Console().print(f"[dim]note: drift canary not baselined ({e})[/dim]")
+        from rich.markup import escape
+
+        from metis.ui import err_console
+        err_console.print(f"[muted]note: drift canary not baselined ({escape(str(e))})[/muted]")
         return
     data[key] = vectors
     _save(data)

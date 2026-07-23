@@ -101,12 +101,13 @@ chromadb:
 def _config_error(detail: str) -> NoReturn:
     """abort with a clean message when the config file is unusable."""
     import typer
-    from rich.console import Console
+    from rich.markup import escape
 
-    console = Console()
-    console.print(f"[red]✗ {CONFIG_PATH} is not a usable config.[/red]")
-    console.print(f"[dim]{detail}[/dim]")
-    console.print(f"[dim]fix it, or delete it to regenerate defaults: rm {CONFIG_PATH}[/dim]")
+    from metis.ui import err_console
+
+    err_console.print(f"[err]✗ {escape(str(CONFIG_PATH))} is not a usable config.[/err]")
+    err_console.print(f"[muted]{escape(detail)}[/muted]")
+    err_console.print(f"[muted]fix it, or delete it to regenerate defaults: rm {escape(str(CONFIG_PATH))}[/muted]")
     raise typer.Exit(1)
 
 

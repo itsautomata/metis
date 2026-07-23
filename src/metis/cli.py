@@ -1,25 +1,101 @@
 """metis CLI: second brain for your markdown notes."""
 
 import functools
+import sys
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
 import typer
 import typer.rich_utils
-from rich.console import Console
+from rich.markup import escape
 
 from metis.config import init_config, load_config
+from metis.ui import console, err_console, show_wordmark
 
-# align typer's auto-generated help accent with metis's magenta
-typer.rich_utils.STYLE_OPTION = "bold magenta"
-typer.rich_utils.STYLE_COMMANDS_TABLE_FIRST_COLUMN = "bold magenta"
+# align typer's auto-generated help accent with the metis accent
+typer.rich_utils.STYLE_OPTION = "bold #e0a458"
+typer.rich_utils.STYLE_COMMANDS_TABLE_FIRST_COLUMN = "bold #e0a458"
 
 app = typer.Typer(
     name="metis",
-    help="CLI second brain for your markdown notes.",
-    no_args_is_help=True,
+    help="terminal second brain: ingest anything, search and chat over your markdown files.",
+    no_args_is_help=False,
 )
-console = Console()
+
+# global flags, set by the app callback below
+_OPTS = {"yes": False, "no_input": False, "debug": False}
+
+
+class SecretAction(str, Enum):
+    set = "set"
+    delete = "delete"
+    list = "list"
+
+
+class SecretName(str, Enum):
+    provider_key = "provider-key"
+    embedding_key = "embedding-key"
+    x_token = "x-token"
+
+
+class ConfigKey(str, Enum):
+    vault = "vault"
+    folder = "folder"
+    link_style = "link-style"
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        from metis import __version__
+        show_wordmark()
+        console.print(f"metis {__version__}")
+        raise typer.Exit()
+
+
+def _splash() -> None:
+    """the warm no-args landing: the wordmark and the commands that start the loop."""
+    from rich.table import Table
+
+    show_wordmark()
+    table = Table(box=None, show_header=False, padding=(0, 3, 0, 2))
+    table.add_column(style="accent", no_wrap=True)
+    table.add_column(style="muted")
+    table.add_row("metis init", "set up (guided)")
+    table.add_row("metis ingest <url or file>", "save, summarize, tag, link")
+    table.add_row("metis search \"<query>\"", "semantic search")
+    table.add_row("metis chat \"<question>\"", "ask your vault")
+    console.print(table)
+    console.print("[muted]metis --help for every command.[/muted]")
+
+
+@app.callback(invoke_without_command=True)
+def _main(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False, "--version", callback=_version_callback, is_eager=True, hidden=True, help="show the version and exit"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="assume yes to every prompt (non-interactive)"),
+    no_input: bool = typer.Option(False, "--no-input", help="never prompt: decline optional prompts, fail on required ones"),
+    debug: bool = typer.Option(False, "--debug", hidden=True, help="show the full traceback on an unexpected error"),
+) -> None:
+    _OPTS["yes"], _OPTS["no_input"], _OPTS["debug"] = yes, no_input, debug
+    if ctx.invoked_subcommand is None:
+        _splash()
+        raise typer.Exit()
+
+
+def _confirm(prompt: str, *, default: bool = False, require_tty: bool = False) -> bool:
+    """confirm on a TTY, honoring --yes/--no-input. off a TTY: decline an optional prompt, or (for a
+    gating/destructive one) fail naming the flag instead of hanging on a cursor."""
+    if _OPTS["yes"]:
+        return True
+    if _OPTS["no_input"] or not sys.stdin.isatty():
+        if require_tty:
+            err_console.print(f"[err]✗ this needs confirmation ({prompt.strip()}); re-run with --yes.[/err]")
+            raise typer.Exit(1)
+        return default
+    return typer.confirm(prompt, default=default)
 
 
 def _provider_guard(fn):
@@ -33,14 +109,14 @@ def _provider_guard(fn):
         try:
             return fn(*args, **kwargs)
         except EmbeddingModelMismatch as e:
-            console.print(f"[red]✗ {e}[/red]")
+            err_console.print(f"[err]✗ {escape(str(e))}[/err]")
             raise typer.Exit(1)
         except (ProviderError, openai.OpenAIError) as e:
-            console.print(f"[red]✗ {e}[/red]")
+            err_console.print(f"[err]✗ {escape(str(e))}[/err]")
             if isinstance(e, openai.AuthenticationError) or "401" in str(e):
-                console.print("[dim]a 401 usually means a wrong or missing key. run 'metis models' to check the key and provider.[/dim]")
+                err_console.print("[muted]a 401 usually means a wrong or missing key. run 'metis models' to check the key and provider.[/muted]")
             else:
-                console.print("[dim]check the model id, base_url, and key (metis config / metis secret).[/dim]")
+                err_console.print("[muted]check the model id, base_url, and key (metis config / metis secret).[/muted]")
             raise typer.Exit(1)
     return wrapper
 
@@ -107,11 +183,11 @@ def _ensure_index_model(config) -> bool:
         check_embedding_model(config)
         return True
     except EmbeddingModelMismatch as e:
-        console.print(f"[red]✗ {e}[/red]")
+        err_console.print(f"[err]✗ {escape(str(e))}[/err]")
         return False
 
 
-@app.command()
+@app.command(rich_help_panel="USE")
 @_provider_guard
 def ingest(
     sources: list[str] = typer.Argument(help="file paths or URLs to ingest"),
@@ -120,7 +196,7 @@ def ingest(
     lang: Optional[str] = typer.Option(None, "--lang", "-l", help="transcript language code (youtube)"),
     pick_lang: bool = typer.Option(False, "--pick-lang", help="interactively pick transcript language (youtube)"),
 ):
-    """save, summarize, tag, embed, and find links for files or URLs."""
+    """save, summarize, tag, embed, and find links for files or URLs"""
     from metis.client import ProviderError
     from metis.index.canary import ensure_baseline
     from metis.index.embed import embed_texts
@@ -138,13 +214,13 @@ def ingest(
         from metis.pick import pick_folder
         folder = pick_folder(config)
         if not folder:
-            console.print("[yellow]! folder pick cancelled, nothing ingested.[/yellow]")
+            err_console.print("[warn]! folder pick cancelled, nothing ingested.[/warn]")
             return
 
     if folder:
         resolved = (config.vault_path / folder).resolve()
         if not resolved.is_relative_to(config.vault_path.resolve()):
-            console.print(f"[red]✗ folder must be inside the vault: {folder}[/red]")
+            err_console.print(f"[err]✗ folder must be inside the vault: {escape(folder)}[/err]")
             return
         config.output_folder = folder
 
@@ -154,7 +230,7 @@ def ingest(
         if len(sources) > 1:
             console.print(f"\n[bold]({i+1}/{len(sources)})[/bold]")
 
-        console.print(f"[bold]ingesting:[/bold] {source}")
+        console.print(f"[bold]ingesting:[/bold] {escape(str(source))}")
 
         # 1. extract
         try:
@@ -162,25 +238,25 @@ def ingest(
 
             from metis.secrets import get_x_bearer
             # --pick-lang opens an interactive prompt; a spinner would fight it
-            spinner = nullcontext() if pick_lang else console.status("extracting text...")
+            spinner = nullcontext() if pick_lang else err_console.status("extracting text...")
             with spinner:
                 title, text, source_type, source_link, extra = extract(
                     source, lang=lang, pick_lang=pick_lang,
                     x_bearer_token=get_x_bearer(),
                 )
         except NoTranscriptError:
-            console.print("[yellow]! no transcript found.[/yellow]")
-            save = typer.confirm("save link anyway?")
+            err_console.print("[warn]! no transcript found.[/warn]")
+            save = _confirm("save link anyway?")
             if save:
                 file_path = write_link_only(source, config)
-                console.print("[bold green]✓ link saved.[/bold green]")
-                console.print(f"  note: {file_path}")
+                console.print("[success]✓ link saved.[/success]")
+                console.print(f"  note: {escape(str(file_path))}")
             continue
         except (FileNotFoundError, ValueError) as e:
-            console.print(f"[red]✗ {e}[/red]")
+            err_console.print(f"[err]✗ {escape(str(e))}[/err]")
             continue
 
-        console.print(f"  title: {title}")
+        console.print(f"  title: {escape(title)}")
         console.print(f"  type:  {source_type}")
         console.print(f"  chars: {len(text):,}")
 
@@ -188,28 +264,28 @@ def ingest(
         existing = check_duplicate(source_link, config)
         replace_path: Optional[Path] = None
         if existing:
-            console.print(f"[yellow]! already ingested:[/yellow] {existing.name}")
-            if not typer.confirm("update?"):
+            err_console.print(f"[warn]! already ingested:[/warn] {escape(existing.name)}")
+            if not _confirm("update?"):
                 continue
             # defer removing the old note's vectors until embedding succeeds (below), so a
             # failed embed leaves the existing note fully intact.
             replace_path = existing
 
         # 2. summarize + tag + chunk
-        with console.status(f"processing with {config.openai.chat_model}..."):
+        with err_console.status(f"processing with {config.openai.chat_model}..."):
             processed = process(text, config)
         console.print(f"  tags:   {', '.join(processed.tags)}")
         console.print(f"  chunks: {len(processed.chunks)}")
 
         # 3. embed first — if this fails, vault stays clean (nothing written yet)
         try:
-            with console.status("embedding and indexing..."):
+            with err_console.status("embedding and indexing..."):
                 embeddings = embed_texts(processed.chunks, config)
         except ProviderError:
             raise  # a model/provider config error: the guard reports it once and aborts
         except Exception as e:
-            console.print(f"[red]✗ embedding failed: {e}[/red]")
-            console.print("[yellow]! note was NOT saved. vault is unchanged.[/yellow]")
+            err_console.print(f"[err]✗ embedding failed: {escape(str(e))}[/err]")
+            err_console.print("[warn]! note was NOT saved. vault is unchanged.[/warn]")
             continue
 
         # 4. suggest folder if none specified (only for first source in batch, or each)
@@ -227,7 +303,7 @@ def ingest(
                         config.output_folder = chosen
                         record_feedback(source, top_folder, chosen, config)
                     else:
-                        console.print(f"[red]✗ folder must be inside the vault: {chosen}. using default.[/red]")
+                        err_console.print(f"[err]✗ folder must be inside the vault: {escape(chosen)}. using default.[/err]")
 
         # 5. write to vault — only after embedding succeeds.
         if replace_path:
@@ -235,15 +311,15 @@ def ingest(
             _remove_file_from_index(str(replace_path), config)
             if replace_path.exists():
                 replace_path.unlink()
-        console.print("[dim]writing to vault...[/dim]")
+        console.print("[muted]writing to vault...[/muted]")
         file_path = write_to_vault(title, text, source_link, source_type, processed, config, extra=extra)
-        console.print(f"  saved: {file_path}")
+        console.print(f"  saved: {escape(str(file_path))}")
 
         # 6. store vectors with pre-computed embeddings
         try:
             n = store_chunks_with_embeddings(processed.chunks, embeddings, file_path, config)
         except EmbeddingModelMismatch as e:
-            console.print(f"[red]✗ {e}[/red]")
+            err_console.print(f"[err]✗ {escape(str(e))}[/err]")
             continue
         console.print(f"  indexed: {n} chunks")
 
@@ -252,28 +328,33 @@ def ingest(
         # baseline the drift canary once the first vectors for this model have landed
         ensure_baseline(config)
 
-        console.print(f"[bold green]✓ done.[/bold green] {file_path.name}")
+        console.print(f"[success]✓ done.[/success] {escape(file_path.name)}")
 
 
-@app.command()
+@app.command(rich_help_panel="USE")
 @_provider_guard
 def search(
     query: str = typer.Argument(help="what to search for"),
-    limit: int = typer.Option(5, "--limit", "-n", help="number of results"),
+    limit: int = typer.Option(5, "--limit", "-n", min=1, help="number of results"),
+    json_out: bool = typer.Option(False, "--json", help="emit results as JSON (non-interactive)"),
 ):
-    """semantic search across your vault."""
+    """semantic search across your vault"""
     from metis.search import search_vault
 
     config = load_config()
     if not _ensure_index_model(config):
         return
-    console.print(f"[bold]searching:[/bold] {query}\n")
+    if not json_out:
+        console.print(f"[bold]searching:[/bold] {escape(query)}\n")
 
-    with console.status("searching..."):
+    with err_console.status("searching..."):
         results = search_vault(query, config, limit=limit)
 
     if not results:
-        console.print("[yellow]! no results. ingest some content first.[/yellow]")
+        if json_out:
+            console.print_json(data=[])
+        else:
+            err_console.print("[warn]! no results. ingest some content first.[/warn]")
         return
 
     # deduplicate by note (keep best chunk per file)
@@ -283,30 +364,41 @@ def search(
             seen[r.file_path] = r
     deduped = list(seen.values())
 
-    for i, r in enumerate(deduped, 1):
-        path = Path(r.file_path).name
+    def _preview(r) -> str:
         preview = r.text[:150].replace("\n", " ").strip()
         if preview.startswith("---"):
             parts = preview.split("---", 2)
             preview = parts[2].strip()[:150] if len(parts) > 2 else preview
-        console.print(f"[bold]{i}.[/bold] [{r.score}] [magenta]{path}[/magenta]")
-        console.print(f"   {preview}...")
+        return preview
+
+    if json_out:
+        console.print_json(data=[
+            {"rank": i, "score": r.score, "note": Path(r.file_path).name,
+             "path": r.file_path, "preview": _preview(r)}
+            for i, r in enumerate(deduped, 1)
+        ])
+        return
+
+    for i, r in enumerate(deduped, 1):
+        path = Path(r.file_path).name
+        console.print(f"[bold]{i}.[/bold] [{r.score}] [accent]{path}[/accent]")
+        console.print(f"   {escape(_preview(r))}...")
         console.print()
 
     # interactive: pick a result to chat about
     from metis.pick import pick_search_result
     selected = pick_search_result(results, config)
     if selected:
-        console.print(f"\n[bold]opening chat for:[/bold] {Path(selected).stem}\n")
+        console.print(f"\n[bold]opening chat for:[/bold] {escape(Path(selected).stem)}\n")
         from metis.chat import ask
-        with console.status("thinking..."):
+        with err_console.status("thinking..."):
             answer, sources, confidence = ask(query, config, note_path=selected)
-        console.print(answer)
+        console.print(escape(answer))
         console.print()
         if sources:
-            console.print("[dim]sources:[/dim]")
+            console.print("[muted]sources:[/muted]")
             for s in sources:
-                console.print(f"  [dim]- {Path(s).name}[/dim]")
+                console.print(f"  [muted]- {escape(Path(s).name)}[/muted]")
 
 
 def _chat_repl(config, note_path: Optional[str], save: bool) -> None:
@@ -316,12 +408,12 @@ def _chat_repl(config, note_path: Optional[str], save: bool) -> None:
 
     from metis.chat import ask, save_qa_to_note
     from metis.client import ProviderError
-    from metis.pick import STYLE
+    from metis.pick import STYLE, _ask
 
     scope = Path(note_path).name if note_path else "the vault"
     console.print(
-        f"[dim]chatting with {scope}. ask anything. "
-        "/save keeps the last answer, /exit quits, /menu for options.[/dim]\n"
+        f"[muted]chatting with {scope}. ask anything. "
+        "/save keeps the last answer, /exit quits, /menu for options.[/muted]\n"
     )
 
     history: list[dict] = []
@@ -329,26 +421,26 @@ def _chat_repl(config, note_path: Optional[str], save: bool) -> None:
 
     def _save_last() -> None:
         if not last:
-            console.print("[yellow]nothing to save yet.[/yellow]\n")
+            console.print("[warn]nothing to save yet.[/warn]\n")
             return
         target = note_path
         if not target:
-            name = questionary.text("save to which note?", style=STYLE).ask()
+            name = _ask(questionary.text("save to which note?", style=STYLE))
             if not name or not name.strip():
                 return
             path = (config.vault_path / Path(name.strip()).with_suffix(".md")).resolve()
             if not path.is_relative_to(config.vault_path.resolve()):
-                console.print("[red]✗ note must be inside the vault.[/red]\n")
+                err_console.print("[err]✗ note must be inside the vault.[/err]\n")
                 return
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.exists():
                 path.write_text(f"# {name.strip()}\n", encoding="utf-8")
             target = str(path)
         save_qa_to_note(target, last[0], last[1])
-        console.print("[green]✓ saved.[/green]\n")
+        console.print("[ok]✓ saved.[/ok]\n")
 
     def _menu() -> Optional[str]:
-        return questionary.select(
+        return _ask(questionary.select(
             "menu:",
             choices=[
                 Choice("keep chatting", "chat"),
@@ -356,10 +448,10 @@ def _chat_repl(config, note_path: Optional[str], save: bool) -> None:
                 Choice("exit", "exit"),
             ],
             style=STYLE,
-        ).ask()
+        ))
 
     while True:
-        q = questionary.text("you:", style=STYLE).ask()
+        q = _ask(questionary.text("you:", style=STYLE))
         if q is None:
             break
         q = q.strip()
@@ -377,18 +469,18 @@ def _chat_repl(config, note_path: Optional[str], save: bool) -> None:
             continue  # keep chatting -- also ctrl-c / cancel, which returns None
 
         try:
-            with console.status("thinking..."):
+            with err_console.status("thinking..."):
                 answer, sources, _ = ask(q, config, note_path=note_path, history=history)
         except ProviderError as e:
-            console.print(f"[red]✗ {e}[/red]\n")
+            err_console.print(f"[err]✗ {escape(str(e))}[/err]\n")
             continue
         except Exception as e:
-            console.print(f"[red]✗ chat turn failed: {e}[/red]\n")
+            err_console.print(f"[err]✗ chat turn failed: {escape(str(e))}[/err]\n")
             continue
 
-        console.print(f"\n[magenta]metis[/magenta] {answer}\n")
+        console.print(f"\n[accent]metis[/accent] {escape(answer)}\n")
         if sources:
-            console.print(f"[dim]sources: {', '.join(Path(s).name for s in sources)}[/dim]\n")
+            console.print(f"[muted]sources: {', '.join(Path(s).name for s in sources)}[/muted]\n")
 
         history.append({"role": "user", "content": q})
         history.append({"role": "assistant", "content": answer})
@@ -397,10 +489,10 @@ def _chat_repl(config, note_path: Optional[str], save: bool) -> None:
         if note_path and save:
             save_qa_to_note(note_path, q, answer)
 
-    console.print("[dim]bye.[/dim]")
+    console.print("[muted]bye.[/muted]")
 
 
-@app.command()
+@app.command(rich_help_panel="USE")
 @_provider_guard
 def chat(
     question: Optional[str] = typer.Argument(None, help="question to ask your vault (omit for an interactive chat loop)"),
@@ -409,7 +501,7 @@ def chat(
     save: bool = typer.Option(False, "--save", "-s", help="save Q&A to the note"),
     expand: bool = typer.Option(False, "--expand", "-e", help="always offer external source search"),
 ):
-    """RAG agent loop over your knowledge base."""
+    """ask your vault a question; answers cite the notes they draw on"""
     from metis.chat import LOW_CONFIDENCE_THRESHOLD, ask
 
     config = load_config()
@@ -432,10 +524,10 @@ def chat(
             note_p = config.vault_path / note_p
         resolved = note_p.resolve()
         if not resolved.is_relative_to(config.vault_path.resolve()):
-            console.print(f"[red]✗ note must be inside the vault: {note}[/red]")
+            err_console.print(f"[err]✗ note must be inside the vault: {escape(note)}[/err]")
             return
         if not note_p.exists():
-            console.print(f"[red]✗ note not found: {note}[/red]")
+            err_console.print(f"[err]✗ note not found: {escape(note)}[/err]")
             return
         # match the exact file_path the index stores (vault_path + clean relative), so a
         # `..` or symlinked --note path still hits the stored chunks instead of silently missing.
@@ -445,22 +537,22 @@ def chat(
         _chat_repl(config, note_path, save)
         return
 
-    console.print(f"[bold]asking:[/bold] {question}\n")
+    console.print(f"[bold]asking:[/bold] {escape(question)}\n")
 
-    with console.status("thinking..."):
+    with err_console.status("thinking..."):
         answer, sources, confidence = ask(question, config, note_path=note_path)
 
-    console.print(answer)
+    console.print(escape(answer))
     console.print()
 
     if sources:
-        console.print("[dim]sources:[/dim]")
+        console.print("[muted]sources:[/muted]")
         for s in sources:
             name = Path(s).name
-            console.print(f"  [dim]- {name}[/dim]")
+            console.print(f"  [muted]- {escape(name)}[/muted]")
 
     if confidence < LOW_CONFIDENCE_THRESHOLD:
-        console.print(f"\n[yellow]low confidence ({confidence:.2f})[/yellow]")
+        console.print(f"\n[warn]low confidence ({confidence:.2f})[/warn]")
 
     # when an expansion will be offered, defer the save so the final answer replaces (not
     # duplicates) this one; _offer_expand then owns the single save for this question.
@@ -476,9 +568,9 @@ def _maybe_save_qa(note_path, question, answer, save, *, expanded_from=None):
     if not note_path:
         return
     from metis.chat import save_qa_to_note
-    if save or typer.confirm("\nsave to note?"):
+    if save or _confirm("save to note?"):
         save_qa_to_note(note_path, question, answer, expanded_from=expanded_from)
-        console.print("[bold green]✓ Q&A saved.[/bold green]")
+        console.print("[success]✓ Q&A saved.[/success]")
 
 
 def _offer_expand(question: str, answer: str, config, note_path: str | None, save: bool):
@@ -491,30 +583,29 @@ def _offer_expand(question: str, answer: str, config, note_path: str | None, sav
     from metis.expand import extract_search_keywords, ingest_external, search_wikipedia
 
     console.print()
-    if not typer.confirm("expand via wikipedia?"):
+    if not _confirm("expand via wikipedia?"):
         _maybe_save_qa(note_path, question, answer, save)
         return
 
-    console.print("[dim]extracting search keywords...[/dim]")
-    keywords = extract_search_keywords(question, config)
-    console.print(f"  keywords: {keywords}")
-
     try:
-        console.print("[dim]searching wikipedia...[/dim]")
+        console.print("[muted]extracting search keywords...[/muted]")
+        keywords = extract_search_keywords(question, config)
+        console.print(f"  keywords: {escape(keywords)}")
+        console.print("[muted]searching wikipedia...[/muted]")
         results = search_wikipedia(keywords)
     except Exception as e:
         err = str(e)
         if "429" in err:
-            console.print("[yellow]! rate limited — wait a minute and try again.[/yellow]")
+            err_console.print("[warn]! rate limited, wait a minute and try again.[/warn]")
         elif "timeout" in err.lower() or "ReadTimeout" in err:
-            console.print("[yellow]! search timed out — try again later.[/yellow]")
+            err_console.print("[warn]! search timed out, try again later.[/warn]")
         else:
-            console.print(f"[red]✗ search failed: {err}[/red]")
+            err_console.print(f"[err]✗ expansion failed: {escape(str(err))}[/err]")
         _maybe_save_qa(note_path, question, answer, save)
         return
 
     if not results:
-        console.print("[yellow]! no results found.[/yellow]")
+        err_console.print("[warn]! no results found.[/warn]")
         _maybe_save_qa(note_path, question, answer, save)
         return
 
@@ -529,34 +620,33 @@ def _offer_expand(question: str, answer: str, config, note_path: str | None, sav
 
     best = next(r for r in results if r.title == picked_title)
 
-    # ingest and re-answer
-    console.print("[dim]ingesting...[/dim]")
+    # ingest and re-answer, scoped to the freshly ingested article
+    console.print("[muted]ingesting...[/muted]")
     try:
         file_path, _ = ingest_external(best, config)
-    except ValueError as e:
-        console.print(f"[red]✗ could not ingest that article: {e}[/red]")
+        console.print(f"  saved: {escape(str(file_path))}")
+        console.print("[muted]re-answering with new source...[/muted]\n")
+        answer, sources, confidence = ask(question, config, note_path=str(file_path))
+    except Exception as e:
+        err_console.print(f"[err]✗ could not expand with that article: {escape(str(e))}[/err]")
         _maybe_save_qa(note_path, question, answer, save)
         return
-    console.print(f"  saved: {file_path}")
 
-    console.print("[dim]re-answering with new source...[/dim]\n")
-    answer, sources, confidence = ask(question, config, note_path=note_path)
-
-    console.print(answer)
+    console.print(escape(answer))
     console.print()
 
     if sources:
-        console.print("[dim]sources:[/dim]")
+        console.print("[muted]sources:[/muted]")
         for s in sources:
             name = Path(s).name
-            console.print(f"  [dim]- {name}[/dim]")
+            console.print(f"  [muted]- {escape(name)}[/muted]")
 
     # save the expanded answer — the single Q&A entry for this question
     note_name = Path(file_path).stem
     _maybe_save_qa(note_path, question, answer, save, expanded_from=(best.source_type, note_name))
 
 
-@app.command()
+@app.command(rich_help_panel="USE")
 @_provider_guard
 def link(
     note: Optional[str] = typer.Argument(None, help="note to find connections for (all notes if omitted)"),
@@ -565,7 +655,7 @@ def link(
     min_score: float = typer.Option(0.7, "--min-score", help="minimum similarity score"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="explain why notes are connected"),
 ):
-    """surface connections between notes."""
+    """surface connections between notes"""
     from metis.link import (
         explain_connection,
         find_connections,
@@ -594,13 +684,13 @@ def link(
         note_path = str(note_p)
 
     target = note or "all notes"
-    console.print(f"[bold]linking:[/bold] {target}\n")
+    console.print(f"[bold]linking:[/bold] {escape(str(target))}\n")
 
-    with console.status("finding connections..."):
+    with err_console.status("finding connections..."):
         connections = find_connections(config, note_path=note_path, min_score=min_score)
 
     if not connections:
-        console.print("[yellow]! no connections found above threshold.[/yellow]")
+        err_console.print("[warn]! no connections found above threshold.[/warn]")
         return
 
     for c in connections:
@@ -609,10 +699,10 @@ def link(
         # remove .md for cleaner display
         source_rel = str(source_rel).removesuffix(".md")
         target_rel = str(target_rel).removesuffix(".md")
-        console.print(f"  [magenta]{source_rel}[/magenta] → [magenta]{target_rel}[/magenta] [{c.score}]")
+        console.print(f"  [accent]{escape(source_rel)}[/accent] → [accent]{escape(target_rel)}[/accent] [{c.score}]")
         if verbose:
             reason = explain_connection(c, config)
-            console.print(f"    [dim]{reason}[/dim]")
+            console.print(f"    [muted]{escape(reason)}[/muted]")
 
     console.print(f"\n{len(connections)} connections found.")
 
@@ -620,18 +710,18 @@ def link(
     if write:
         n = write_links(connections, config)
         label = "wikilinks" if style == "wikilink" else "markdown links"
-        console.print(f"[bold green]✓ {n} {label} written.[/bold green]")
+        console.print(f"[success]✓ {n} {label} written.[/success]")
     else:
         example = "[[wikilinks]]" if style == "wikilink" else "[markdown](links)"
-        console.print(f"[dim]use --write to add {example} to your notes.[/dim]")
+        console.print(f"[muted]use --write to add {example} to your notes.[/muted]")
 
 
-@app.command()
+@app.command(rich_help_panel="MAINTAIN")
 @_provider_guard
 def sync(
     force: bool = typer.Option(False, "--force", help="sync even if the vault resolves to zero files (removes all indexed notes)"),
 ):
-    """re-index vault to catch manual edits."""
+    """re-index vault to catch manual edits"""
     from rich.progress import (
         BarColumn,
         MofNCompleteColumn,
@@ -647,14 +737,15 @@ def sync(
     config = load_config()
     if not _ensure_index_model(config):
         return
-    console.print(f"[bold]syncing:[/bold] {config.vault_path}\n")
+    console.print(f"[bold]syncing:[/bold] {escape(str(config.vault_path))}\n")
 
     from metis.index.canary import check_drift
-    _drift = check_drift(config)
+    with err_console.status("checking embedding drift..."):
+        _drift = check_drift(config)
     if _drift.status == "drift":
-        console.print("[yellow]⚠ embedding output has drifted since the index was built; new chunks will land in a different space. consider 'metis reindex' first.[/yellow]\n")
+        console.print("[warn]⚠ embedding output has drifted since the index was built; new chunks will land in a different space. consider 'metis reindex' first.[/warn]\n")
     elif _drift.status == "variance":
-        console.print("[yellow]⚠ provider returns unstable embeddings (non-deterministic routing); pin the provider/quantization, reindex will not fix this.[/yellow]\n")
+        console.print("[warn]⚠ provider returns unstable embeddings (non-deterministic routing); pin the provider/quantization, reindex will not fix this.[/warn]\n")
 
     try:
         with Progress(
@@ -663,7 +754,7 @@ def sync(
             BarColumn(),
             MofNCompleteColumn(),
             TimeElapsedColumn(),
-            console=console,
+            console=err_console,
             transient=True,
         ) as progress:
             task = progress.add_task("scanning...", total=None)
@@ -673,16 +764,16 @@ def sync(
                     task,
                     total=total,
                     completed=done,
-                    description=f"[dim]{name[:44]}[/dim]" if name else "[dim]finishing...[/dim]",
+                    description=f"[muted]{name[:44]}[/muted]" if name else "[muted]finishing...[/muted]",
                 )
 
             report = sync_vault(config, on_progress=_on_progress, force=force)
     except EmptyVaultError as e:
-        console.print(f"[red]✗ {e}[/red]")
-        console.print("[dim]if you really emptied the vault, re-run with --force (or 'metis reindex' to rebuild).[/dim]")
+        err_console.print(f"[err]✗ {escape(str(e))}[/err]")
+        console.print("[muted]if you really emptied the vault, re-run with --force (or 'metis reindex' to rebuild).[/muted]")
         raise typer.Exit(1)
     except EmbeddingModelMismatch as e:
-        console.print(f"[red]✗ {e}[/red]")
+        err_console.print(f"[err]✗ {escape(str(e))}[/err]")
         raise typer.Exit(1)
 
     console.print(f"  added:     {report.added} files")
@@ -690,58 +781,195 @@ def sync(
     console.print(f"  deleted:   {report.deleted} files")
     console.print(f"  unchanged: {report.unchanged} files")
     if report.skipped:
-        console.print(f"  [yellow]skipped:   {report.skipped} unreadable files[/yellow]")
+        console.print(f"  [warn]skipped:   {report.skipped} unreadable files[/warn]")
     console.print()
-    console.print(f"[bold green]✓ vault indexed.[/bold green] {report.total_files} files.")
+    console.print(f"[success]✓ vault indexed.[/success] {report.total_files} files.")
 
 
-@app.command()
+@app.command(rich_help_panel="MAINTAIN")
 @_provider_guard
-def reindex():
-    """rebuild the whole index from scratch (use after changing the embedding model)."""
+def reindex(
+    dry_run: bool = typer.Option(False, "--dry-run", help="report what would be re-embedded without calling the provider"),
+):
+    """rebuild the whole index from scratch (use after changing the embedding model)"""
     from metis.index.sync import reindex_vault
 
     config = load_config()
     model = config.openai.embedding_model
-    console.print(f"[bold]reindexing:[/bold] {config.vault_path}")
-    console.print(f"  embedding model: [magenta]{model}[/magenta]\n")
-    if not typer.confirm(f"re-embed every note with {model}? (costs one embedding call per chunk)"):
+    console.print(f"[bold]reindexing:[/bold] {escape(str(config.vault_path))}")
+    console.print(f"  embedding model: [accent]{escape(model)}[/accent]\n")
+
+    if dry_run:
+        from metis.index.sync import _find_vault_files
+        n = sum(1 for _ in _find_vault_files(config))
+        console.print(f"  would re-embed [bold]{n}[/bold] notes with [accent]{escape(model)}[/accent] (one embedding call per chunk).")
+        console.print("[muted]run without --dry-run to execute.[/muted]")
         return
 
-    with console.status("re-embedding the whole vault..."):
+    if not _confirm(f"re-embed every note with {model}? (costs one embedding call per chunk)", require_tty=True):
+        return
+
+    with err_console.status("re-embedding the whole vault..."):
         report = reindex_vault(config)
 
     console.print(f"  reindexed: {report.total_files} files, {report.total_chunks} chunks")
-    console.print("[bold green]✓ index rebuilt.[/bold green]")
+    console.print("[success]✓ index rebuilt.[/success]")
 
 
-@app.command()
+def _interactive() -> bool:
+    """a real terminal and no non-interactive flag: the guided wizard may prompt."""
+    return sys.stdin.isatty() and not _OPTS["no_input"] and not _OPTS["yes"]
+
+
+# provider presets: a menu pick fills base_url
+_PROVIDERS = [
+    ("openai", ""),
+    ("openrouter", "https://openrouter.ai/api/v1"),
+    ("ollama / local", "http://localhost:11434/v1"),
+]
+_CUSTOM_BASE_URL = object()
+
+
+def _wizard_base_url(current: str) -> str:
+    """provider menu returning a base_url; the last option accepts a custom endpoint."""
+    from metis import pick
+
+    options = [
+        (f"{name}  (default)" if not url else f"{name}  [{url}]", url)
+        for name, url in _PROVIDERS
+    ]
+    options.append(("custom base url", _CUSTOM_BASE_URL))
+    picked = pick.pick_from("provider:", options, default=current)
+    if picked is _CUSTOM_BASE_URL:
+        return typer.prompt("base url", default=current or "").strip()
+    if picked is None:
+        return current
+    return picked
+
+
+def _store_key(label: str, keychain_name: str) -> None:
+    """prompt for a secret and store it; a blank entry skips. a keychain failure is reported, not fatal."""
+    from metis.secrets import KeychainError, set_secret
+
+    value = typer.prompt(f"{label} (blank = set later)", default="", hide_input=True).strip()
+    if not value:
+        return
+    try:
+        set_secret(keychain_name, value)
+        console.print(f"[ok]✓ {label} saved to the keychain.[/ok]")
+    except KeychainError as e:
+        err_console.print(f"[err]✗ {escape(str(e))}[/err]")
+
+
+def _init_wizard(config) -> None:
+    """a-to-z guided setup on a terminal: vault, provider, key, models, folder, links, optional extras.
+    every prompt shows a default (enter accepts); optional fields take a blank line to stay unset.
+    """
+    import yaml
+
+    from metis.config import CONFIG_PATH
+    from metis.secrets import EMBEDDING_KEY, PROVIDER_KEY, X_BEARER, get_provider_key
+
+    show_wordmark()
+    console.print("[bold]metis setup[/bold] [muted](enter accepts the default, blank leaves it unset)[/muted]\n")
+
+    with open(CONFIG_PATH) as f:
+        raw = yaml.safe_load(f) or {}
+    raw["openai"] = raw.get("openai") or {}
+
+    vault_path = Path(typer.prompt("vault path", default=str(config.vault_path)).strip()).expanduser()
+    raw["vault_path"] = str(vault_path)
+
+    raw["openai"]["base_url"] = _wizard_base_url(config.openai.base_url)
+
+    if not get_provider_key():
+        _store_key("provider api key", PROVIDER_KEY)
+
+    raw["openai"]["chat_model"] = typer.prompt("chat model", default=config.openai.chat_model).strip()
+    raw["openai"]["embedding_model"] = typer.prompt("embedding model", default=config.openai.embedding_model).strip()
+
+    raw["output_folder"] = typer.prompt("save ingested notes to", default=config.output_folder).strip()
+
+    from metis import pick
+
+    link = pick.pick_from("link style:", [
+        ("auto (detect from the vault's notes app)", "auto"),
+        ("wikilink  [[note]]", "wikilink"),
+        ("markdown  [note](note.md)", "markdown"),
+    ], default=config.link_style or "auto")
+    if link in ("wikilink", "markdown"):
+        raw["link_style"] = link
+    else:
+        raw.pop("link_style", None)
+
+    if pick.confirm_menu("advanced options (separate embedding endpoint, extra keys)?", default=False):
+        embed_url = typer.prompt("embedding base url (blank = share with chat)", default="").strip()
+        if embed_url:
+            embed_model = typer.prompt("embedding model on that endpoint", default=raw["openai"]["embedding_model"]).strip()
+            raw["embedding"] = {"base_url": embed_url, "model": embed_model}
+            _store_key("embedding api key", EMBEDDING_KEY)
+        _store_key("x / twitter token", X_BEARER)
+
+    with open(CONFIG_PATH, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+    console.print()
+
+
+@app.command(rich_help_panel="SETUP")
 def init():
-    """initialize metis config and directories."""
+    """set up metis, guided.
+
+    creates the config and directories, and on a terminal runs a wizard for the vault, provider,
+    key, and models. with --no-input or --yes it writes defaults for CI.
+    """
     config_path = init_config()
     config = load_config()
 
+    interactive = _interactive()
+    if interactive:
+        _init_wizard(config)
+        config = load_config()
+
+    for label, path in (("vault", config.vault_path), ("index", config.chromadb_path)):
+        if path.exists() and not path.is_dir():
+            err_console.print(f"[err]✗ the {label} path is a file, not a directory: {escape(str(path))}[/err]")
+            raise typer.Exit(1)
     config.vault_path.mkdir(parents=True, exist_ok=True)
     config.chromadb_path.mkdir(parents=True, exist_ok=True)
 
-    console.print("[bold green]✓ metis initialized.[/bold green]")
-    console.print(f"  config: {config_path}")
-    console.print(f"  vault:  {config.vault_path}")
-    console.print(f"  db:     {config.chromadb_path}")
-    console.print("\n[dim]edit ~/.metis/config.yaml to set your vault path.[/dim]")
-    console.print("[dim]run 'metis secret set <name>' to store api keys securely.[/dim]")
+    from rich.table import Table
+    console.print("[success]✓ metis initialized[/success]")
+    paths = Table(box=None, show_header=False, padding=(0, 2, 0, 2))
+    paths.add_column(style="muted", no_wrap=True)
+    paths.add_column(overflow="fold")
+    paths.add_row("config", escape(str(config_path)))
+    paths.add_row("vault", escape(str(config.vault_path)))
+    paths.add_row("index", escape(str(config.chromadb_path)))
+    console.print(paths)
+
+    if not interactive:
+        console.print("\n[muted]set the vault path: metis config vault <path>[/muted]")
+        console.print("[muted]store an api key:   metis secret set provider-key[/muted]")
+        return
+
+    console.print()
+    from metis import pick
+    if pick.confirm_menu("run doctor to validate the setup now?", default=True):
+        console.print()
+        try:
+            doctor(json_out=False)
+        except typer.Exit:
+            pass
+    console.print("\n[muted]next: metis ingest <url or file>[/muted]")
 
 
-def _complete_config_keys(incomplete: str) -> list[str]:
-    return [k for k in ["vault", "folder", "link-style"] if k.startswith(incomplete)]
-
-
-@app.command(name="config")
+@app.command(name="config", rich_help_panel="SETUP")
 def config_cmd(
-    key: Optional[str] = typer.Argument(None, help="setting: vault, folder, link-style", autocompletion=_complete_config_keys),
+    key: Optional[ConfigKey] = typer.Argument(None, help="setting to change"),
     value: Optional[str] = typer.Argument(None, help="new value"),
 ):
-    """view or change metis settings."""
+    """view or change metis settings"""
+    key = key.value if key is not None else None
     import yaml
 
     from metis.config import CONFIG_PATH, init_config
@@ -762,15 +990,15 @@ def config_cmd(
         from metis.link import resolve_link_style
 
         config = load_config()
-        console.print(f"  vault:    {config.vault_path}")
-        console.print(f"  folder:   {config.output_folder}")
+        console.print(f"  vault:    {escape(str(config.vault_path))}")
+        console.print(f"  folder:   {escape(config.output_folder)}")
         console.print(f"  base_url: {config.openai.base_url or 'default (openai)'}")
         console.print(f"  links:    {resolve_link_style(config)}{' (forced)' if config.link_style else ' (auto)'}")
-        console.print(f"\n[dim]{CONFIG_PATH}[/dim]")
+        console.print(f"\n[muted]{escape(str(CONFIG_PATH))}[/muted]")
         return
 
     if key not in config_keys:
-        console.print(f"[red]✗ unknown setting: {key}. options: {', '.join(config_keys.keys())}[/red]")
+        err_console.print(f"[err]✗ unknown setting: {escape(key)}. options: {', '.join(config_keys.keys())}[/err]")
         return
 
     # no value: show current
@@ -783,7 +1011,7 @@ def config_cmd(
     yaml_key = config_keys[key]
     if key == "link-style":
         if value not in ("wikilink", "markdown", "auto"):
-            console.print(f"[red]✗ link-style must be wikilink, markdown, or auto (got: {value})[/red]")
+            err_console.print(f"[err]✗ link-style must be wikilink, markdown, or auto (got: {escape(value)})[/err]")
             return
         if value == "auto":
             raw.pop(yaml_key, None)  # clear so it auto-detects from the vault's notes app
@@ -794,7 +1022,7 @@ def config_cmd(
     with open(CONFIG_PATH, "w") as f:
         yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
 
-    console.print(f"[bold green]✓ {key} set to: {value}[/bold green]")
+    console.print(f"[success]✓ {escape(key)} set to: {escape(value)}[/success]")
 
 
 def _keychain_key() -> str:
@@ -808,9 +1036,9 @@ def _keychain_key() -> str:
         return ""
 
 
-@app.command()
+@app.command(rich_help_panel="INSPECT")
 def models():
-    """show the chat and embedding models in use, the resolved key, and whether the index matches."""
+    """show the chat and embedding models in use, the resolved key, and whether the index matches"""
     import os
 
     from metis.client import get_chat_model, get_embedding_model, provider_of
@@ -823,25 +1051,25 @@ def models():
     embed_tag = " (shared with chat)" if not config.embedding.base_url else " (separate)"
     resolved_model = get_embedding_model(config)
     raw_model = (config.embedding.model or config.openai.embedding_model) if config.embedding.base_url else config.openai.embedding_model
-    adapted = " [dim](adapted for openrouter)[/dim]" if resolved_model != raw_model else ""
+    adapted = " [muted](adapted for openrouter)[/muted]" if resolved_model != raw_model else ""
 
     console.print("[bold]chat[/bold]")
-    console.print(f"  model:    [magenta]{get_chat_model(config)}[/magenta]")
-    console.print(f"  provider: {chat_endpoint}")
+    console.print(f"  model:    [accent]{escape(get_chat_model(config))}[/accent]")
+    console.print(f"  provider: {escape(chat_endpoint)}")
     console.print()
     console.print("[bold]embedding[/bold]")
-    console.print(f"  model:    [magenta]{resolved_model}[/magenta]{adapted}")
-    console.print(f"  provider: {embed_endpoint}{embed_tag}")
+    console.print(f"  model:    [accent]{escape(resolved_model)}[/accent]{adapted}")
+    console.print(f"  provider: {escape(embed_endpoint)}{embed_tag}")
 
     collection = get_collection(config)
     if collection.count() == 0:
-        console.print("  index:    [dim](empty)[/dim]")
+        console.print("  index:    [muted](empty)[/muted]")
     else:
         stamped = indexed_embedding_model(collection)
         if stamped == resolved_model:
-            console.print(f"  index:    {stamped} [green]✓[/green]")
+            console.print(f"  index:    {escape(stamped)} [ok]✓[/ok]")
         else:
-            console.print(f"  index:    {stamped} [red]✗ config says {resolved_model}, run 'metis reindex'[/red]")
+            console.print(f"  index:    {escape(stamped)} [err]✗ config says {escape(resolved_model)}, run 'metis reindex'[/err]")
 
     # key: source + provider guess + conflict/mismatch warnings (never prints the key)
     console.print()
@@ -850,21 +1078,23 @@ def models():
     env = os.environ.get("METIS_PROVIDER_KEY", "") or ""
     resolved_key = get_provider_key()
     if not resolved_key:
-        console.print("  [red]✗ no provider-key set. run 'metis secret set provider-key'[/red]")
+        console.print("  [err]✗ no provider-key set. run 'metis secret set provider-key'[/err]")
     else:
         source = "keychain" if kc else "env"
         key_prov = _key_provider(resolved_key)
         console.print(f"  source:   {source} (looks like {key_prov})")
         base_prov = provider_of(config.openai.base_url)
         if key_prov in ("openai", "openrouter") and base_prov in ("openai", "openrouter") and key_prov != base_prov:
-            console.print(f"  [red]⚠ base_url is {base_prov} but the key looks like {key_prov}: likely the wrong key[/red]")
+            console.print(f"  [err]⚠ base_url is {base_prov} but the key looks like {key_prov}: likely the wrong key[/err]")
         if len({v for v in (kc, env) if v}) > 1:
-            console.print("  [yellow]⚠ different keys in keychain and env; keychain wins. clear one to avoid confusion.[/yellow]")
+            console.print("  [warn]⚠ different keys in keychain and env; keychain wins. clear one to avoid confusion.[/warn]")
 
 
-@app.command()
-def doctor():
-    """validate the setup and print a ✓/✗ checklist. exits non-zero if anything is off.
+@app.command(rich_help_panel="INSPECT")
+def doctor(
+    json_out: bool = typer.Option(False, "--json", help="emit the checklist as JSON"),
+):
+    """validate the setup and print a ✓/✗ checklist; exits non-zero if anything is off
 
     includes a live embedding-drift check (re-embeds a canary); it degrades to a neutral
     result when the provider is unreachable, so the rest of the checklist still works offline.
@@ -877,15 +1107,20 @@ def doctor():
 
     config = load_config()
     ok = True
+    checks: list[dict] = []
 
     def check(passed: bool, label: str, detail: str, fix: str = "") -> None:
         nonlocal ok
-        if passed:
-            console.print(f"  [green]✓[/green] {label:<10}{detail}")
-        else:
+        checks.append({"check": label, "passed": passed, "detail": detail, "fix": fix})
+        if not passed:
             ok = False
-            tail = f" [dim]{fix}[/dim]" if fix else ""
-            console.print(f"  [red]✗[/red] {label:<10}{detail}{tail}")
+        if json_out:
+            return
+        if passed:
+            console.print(f"  [ok]✓[/ok] {label:<10}{escape(detail)}")
+        else:
+            tail = f" [muted]{escape(fix)}[/muted]" if fix else ""
+            console.print(f"  [err]✗[/err] {label:<10}{escape(detail)}{tail}")
 
     base_prov = provider_of(config.openai.base_url)
     resolved_key = get_provider_key()
@@ -916,7 +1151,8 @@ def doctor():
 
     if collection.count() > 0:
         from metis.index.canary import check_drift
-        verdict = check_drift(config)
+        with err_console.status("checking embedding drift..."):
+            verdict = check_drift(config)
         if verdict.status == "drift":
             check(False, "drift", "embedding model changed since the index was built", "run 'metis reindex'")
         elif verdict.status == "variance":
@@ -926,20 +1162,28 @@ def doctor():
         else:  # stable | not_baselined
             check(True, "drift", verdict.detail)
 
+    if json_out:
+        console.print_json(data={"ok": ok, "checks": checks})
+        if not ok:
+            raise typer.Exit(1)
+        return
+
     console.print()
     if ok:
-        console.print("[bold green]✓ metis is ready.[/bold green]")
+        console.print("[success]✓ metis is ready.[/success]")
     else:
-        console.print("[bold red]✗ setup has issues. fix the marked lines above.[/bold red]")
+        console.print("[danger]✗ setup has issues. fix the marked lines above.[/danger]")
         raise typer.Exit(1)
 
 
-@app.command()
+@app.command(rich_help_panel="SETUP")
 def secret(
-    action: str = typer.Argument(help="'set', 'delete', or 'list'"),
-    name: Optional[str] = typer.Argument(None, help="key name: provider-key, embedding-key, x-token"),
+    action: SecretAction = typer.Argument(help="set, delete, or list"),
+    name: Optional[SecretName] = typer.Argument(None, help="which key"),
 ):
-    """manage api keys in the OS keychain."""
+    """manage api keys in the OS keychain"""
+    action = action.value
+    name = name.value if name is not None else None
     from metis.secrets import (
         EMBEDDING_KEY,
         PROVIDER_KEY,
@@ -963,7 +1207,7 @@ def secret(
             "x-token": get_x_bearer(),
         }
         for display_name in key_map:
-            status = "[green]set[/green]" if resolved[display_name] else "[dim]not set[/dim]"
+            status = "[ok]set[/ok]" if resolved[display_name] else "[muted]not set[/muted]"
             console.print(f"  {display_name}: {status}")
         return
 
@@ -975,7 +1219,7 @@ def secret(
             return
 
     if name not in key_map:
-        console.print(f"[red]✗ unknown key: {name}. options: {', '.join(key_map.keys())}[/red]")
+        err_console.print(f"[err]✗ unknown key: {name}. options: {', '.join(key_map.keys())}[/err]")
         return
 
     keychain_name = key_map[name]
@@ -984,29 +1228,29 @@ def secret(
         import getpass
         value = getpass.getpass(f"enter {name}: ")
         if not value:
-            console.print("[yellow]! empty value, nothing saved.[/yellow]")
+            err_console.print("[warn]! empty value, nothing saved.[/warn]")
             return
         try:
             set_secret(keychain_name, value)
         except KeychainError as e:
-            console.print(f"[red]✗ {e}[/red]")
+            err_console.print(f"[err]✗ {escape(str(e))}[/err]")
             return
-        console.print(f"[bold green]✓ {name} saved to keychain.[/bold green]")
+        console.print(f"[success]✓ {name} saved to keychain.[/success]")
 
     elif action == "delete":
         delete_secret(keychain_name)
-        console.print(f"[bold green]✓ {name} removed from keychain.[/bold green]")
+        console.print(f"[success]✓ {name} removed from keychain.[/success]")
 
     else:
-        console.print(f"[red]✗ unknown action: {action}. use 'set', 'delete', or 'list'.[/red]")
+        err_console.print(f"[err]✗ unknown action: {action}. use 'set', 'delete', or 'list'.[/err]")
 
 
-@app.command()
+@app.command(rich_help_panel="INSPECT")
 @_provider_guard
 def folders(
     edit: bool = typer.Option(False, "--edit", "-e", help="open folder descriptions in editor"),
 ):
-    """list vault folders with their descriptions, or edit them."""
+    """list vault folders with their descriptions, or edit them"""
     import os
     import subprocess
     import tempfile
@@ -1023,7 +1267,7 @@ def folders(
     folders = vault_folders(config)
 
     if not folders:
-        console.print("[yellow]! no folders in vault.[/yellow]")
+        err_console.print("[warn]! no folders in vault.[/warn]")
         return
 
     data = _load_categorization(config)
@@ -1065,7 +1309,7 @@ def folders(
         os.unlink(tmp_path)
 
         if not updated:
-            console.print("[yellow]! no changes detected.[/yellow]")
+            err_console.print("[warn]! no changes detected.[/warn]")
             return
 
         # apply changes and re-embed updated folders
@@ -1082,31 +1326,31 @@ def folders(
         _save_categorization(data, config)
 
         if changed:
-            console.print(f"[dim]re-embedding {len(changed)} updated folders...[/dim]")
+            console.print(f"[muted]re-embedding {len(changed)} updated folders...[/muted]")
             get_folder_embeddings(config)
-            console.print(f"[bold green]✓ {len(changed)} folder descriptions updated.[/bold green]")
+            console.print(f"[success]✓ {len(changed)} folder descriptions updated.[/success]")
             for f in changed:
-                console.print(f"  [magenta]{f}[/magenta]")
+                console.print(f"  [accent]{escape(f)}[/accent]")
         else:
-            console.print("[yellow]! no changes detected.[/yellow]")
+            err_console.print("[warn]! no changes detected.[/warn]")
 
     else:
         # list mode
         for f in folders:
             note_count = len(list((config.vault_path / f).glob("*.md")))
             desc = descriptions.get(f, "")
-            console.print(f"[bold magenta]{f}[/bold magenta] ({note_count} notes)")
-            console.print(f"  [dim]{desc}[/dim]")
+            console.print(f"[heading]{escape(f)}[/heading] ({note_count} notes)")
+            console.print(f"  [muted]{escape(desc)}[/muted]")
             console.print()
 
 
-@app.command()
+@app.command(rich_help_panel="INSPECT")
 def health(
     misplaced: bool = typer.Option(False, "--misplaced", help="show notes that might belong in a different folder"),
     split: Optional[str] = typer.Option(None, "--split", help="show split suggestion for a specific folder"),
     unique: bool = typer.Option(False, "--unique", help="show notes that don't cluster with anything"),
 ):
-    """vault health checkup: folder alignment, misplaced notes, split suggestions."""
+    """vault health checkup: folder alignment, misplaced notes, split suggestions"""
     from metis.health import run_health
 
     config = load_config()
@@ -1121,10 +1365,11 @@ def health(
             return Path(fp).stem
 
     console.print("[bold]checking vault health...[/bold]\n")
-    report = run_health(config)
+    with err_console.status("analyzing notes..."):
+        report = run_health(config)
 
     if report.n_notes < 2:
-        console.print("[yellow]! not enough notes to analyze.[/yellow]")
+        err_console.print("[warn]! not enough notes to analyze.[/warn]")
         return
 
     # --- flag: --split <folder> ---
@@ -1132,23 +1377,23 @@ def health(
         from metis.health import analyze_split
         groups = analyze_split(split, config)
         if groups is None:
-            console.print(f"[yellow]! {split}/ has too few notes to split (need 4+).[/yellow]")
+            err_console.print(f"[warn]! {escape(split)}/ has too few notes to split (need 4+).[/warn]")
             return
-        console.print(f"[bold]{split}/[/bold] could split into:\n")
+        console.print(f"[bold]{escape(split)}/[/bold] could split into:\n")
         for group in groups:
-            console.print(f"  [magenta]{split}/{group.folder_name}/[/magenta] ({group.size} notes)")
-            console.print(f"  topics: [dim]{group.label}[/dim]")
+            console.print(f"  [accent]{escape(split)}/{escape(group.folder_name)}/[/accent] ({group.size} notes)")
+            console.print(f"  topics: [muted]{escape(group.label)}[/muted]")
             for fp, _ in group.members[:5]:
-                console.print(f"    {_short(fp)}")
+                console.print(f"    {escape(_short(fp))}")
             if group.size > 5:
-                console.print(f"    [dim]...and {group.size - 5} more[/dim]")
+                console.print(f"    [muted]...and {group.size - 5} more[/muted]")
             console.print()
         return
 
     # --- flag: --misplaced ---
     if misplaced:
         if not report.misplaced:
-            console.print("[green]✓ no misplaced notes found. everything looks right.[/green]")
+            console.print("[ok]✓ no misplaced notes found. everything looks right.[/ok]")
             return
         console.print(f"[bold]{len(report.misplaced)} potentially misplaced notes:[/bold]\n")
         from collections import defaultdict as _dd
@@ -1156,39 +1401,39 @@ def health(
         for m in report.misplaced:
             by_dest[m.suggested_folder].append(m)
         for dest, items in sorted(by_dest.items()):
-            console.print(f"  move to [magenta]{dest}/[/magenta]:")
+            console.print(f"  move to [accent]{escape(dest)}/[/accent]:")
             for m in items:
-                console.print(f"    {_short(m.file_path)} ({m.neighbor_count}/5)")
+                console.print(f"    {escape(_short(m.file_path))} ({m.neighbor_count}/5)")
             console.print()
         return
 
     # --- flag: --unique ---
     if unique:
         if not report.unique:
-            console.print("[green]✓ no isolated notes found.[/green]")
+            console.print("[ok]✓ no isolated notes found.[/ok]")
             return
         console.print(f"[bold]{len(report.unique)} unique notes:[/bold]\n")
         for fp, folder in report.unique:
-            console.print(f"  [dim]{_short(fp)}[/dim]")
+            console.print(f"  [muted]{escape(_short(fp))}[/muted]")
         return
 
     # --- default: folder health overview ---
     for fh in report.folders:
         if fh.status == "—":
-            label = "[dim]—[/dim]"
+            label = "[muted]—[/muted]"
         elif fh.status == "tight":
-            label = "[green]tight[/green]"
+            label = "[ok]tight[/ok]"
         elif fh.status == "mixed":
-            label = "[yellow]mixed[/yellow]"
+            label = "[warn]mixed[/warn]"
         else:
-            label = "[red]scattered[/red]"
+            label = "[err]scattered[/err]"
 
         if len(fh.topics) >= 2:
-            topic_names = " + ".join(f"[{t.label.split(',')[0].strip()}]" for t in fh.topics)
-            console.print(f"  {label}  [magenta]{fh.folder}/[/magenta] ({fh.total} notes)")
+            topic_names = " + ".join(f"\\[{escape(t.label.split(',')[0].strip())}]" for t in fh.topics)
+            console.print(f"  {label}  [accent]{escape(fh.folder)}/[/accent] ({fh.total} notes)")
             console.print(f"           spans: {topic_names}")
         else:
-            console.print(f"  {label}  [magenta]{fh.folder}/[/magenta] ({fh.total} notes)")
+            console.print(f"  {label}  [accent]{escape(fh.folder)}/[/accent] ({fh.total} notes)")
     console.print()
 
     # hints for next steps
@@ -1205,3 +1450,23 @@ def health(
         console.print()
         for h in hints:
             console.print(f"  {h}")
+
+
+def main() -> None:
+    """entry point that turns an unexpected crash into a clean stderr message (honors --debug)."""
+    try:
+        app()
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        if _OPTS["debug"]:
+            err_console.print_exception(show_locals=False)
+        else:
+            err_console.print("[err]✗ something went wrong (this looks like a bug in metis).[/err]")
+            err_console.print(f"  [muted]{escape(str(exc))}[/muted]")
+            err_console.print("[muted]re-run the same command with --debug to see the full traceback.[/muted]")
+        raise typer.Exit(1)
+
+
+if __name__ == "__main__":
+    main()

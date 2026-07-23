@@ -48,5 +48,4 @@ def test_overlap_exists():
     if len(chunks) >= 2:
         # last words of chunk 0 should appear in chunk 1
         last_words = chunks[0].split()[-10:]
-        last_phrase = " ".join(last_words)
         assert any(word in chunks[1] for word in last_words[:5])

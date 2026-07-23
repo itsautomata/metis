@@ -46,7 +46,7 @@ test = [
 ]
 
 [project.scripts]
-metis = "metis.cli:app"
+metis = "metis.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/itsautomata/metis"

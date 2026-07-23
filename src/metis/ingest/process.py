@@ -18,7 +18,9 @@ class ProcessedContent:
 
 def _strip_code_fence(text: str) -> str:
     """strip a leading ```json/``` fence and trailing ``` that some models add around JSON."""
-    text = (text or "").strip()
+    if not isinstance(text, str):
+        return ""
+    text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
         text = re.sub(r"\n?```$", "", text)
@@ -66,10 +68,10 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
         response_format={"type": "json_object"},
     )
 
-    from rich.console import Console
+    from metis.ui import err_console
 
     if not response.choices:
-        Console().print("[yellow]! summary/tags skipped: the model returned no choices[/yellow]")
+        err_console.print("[warn]! summary/tags skipped: the model returned no choices[/warn]")
         return "", [], []
 
     raw = _strip_code_fence(response.choices[0].message.content or "")
@@ -77,11 +79,11 @@ def summarize_and_tag(text: str, config: MetisConfig) -> tuple[str, list[str], l
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        Console().print("[yellow]! summary/tags skipped: the model did not return JSON[/yellow]")
+        err_console.print("[warn]! summary/tags skipped: the model did not return JSON[/warn]")
         return "", [], []
 
     if not isinstance(parsed, dict):
-        Console().print("[yellow]! summary/tags skipped: the model did not return a JSON object[/yellow]")
+        err_console.print("[warn]! summary/tags skipped: the model did not return a JSON object[/warn]")
         return "", [], []
 
     summary = _sanitize_summary(parsed.get("summary", ""), text)
