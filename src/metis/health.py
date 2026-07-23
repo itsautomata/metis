@@ -231,7 +231,7 @@ def run_health(config: MetisConfig) -> HealthReport:
             continue
 
         distances = distance_matrix[i]
-        nearest = np.argsort(distances)[1:k+1]  # skip self (index 0)
+        nearest = [j for j in np.argsort(distances) if j != i][:k]  # exclude self by identity, not position
 
         neighbor_folders = [folders[j] for j in nearest]
         folder_counts = Counter(neighbor_folders)
