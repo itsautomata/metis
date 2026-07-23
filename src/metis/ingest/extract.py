@@ -4,7 +4,7 @@ import ipaddress
 import re
 import socket
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import fitz
 import httpx
@@ -48,17 +48,52 @@ def is_url(source: str) -> bool:
     return source.startswith("http://") or source.startswith("https://")
 
 
+_YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
+
+
+def _normalize_url(url: str) -> str:
+    """strip shell-paste artifacts (backslashes, surrounding whitespace) that are never valid in a URL."""
+    return url.strip().replace("\\", "")
+
+
+def canonical_youtube_id(url: str) -> str | None:
+    """the 11-char video id from any youtube URL form, or None if url is not a youtube video.
+
+    handles watch?v=, youtu.be/, shorts/, embed/, live/, v/, the m./music. subdomains, extra query
+    params, fragments, and shell-escaped pastes.
+    """
+    parsed = urlparse(_normalize_url(url))
+    host = (parsed.hostname or "").lower()
+    if host not in _YOUTUBE_HOSTS:
+        return None
+    path_match = re.search(r"/(?:shorts|embed|live|v)/([a-zA-Z0-9_-]{11})", parsed.path)
+    if path_match:
+        return path_match.group(1)
+    if host == "youtu.be":
+        bare = re.match(r"/([a-zA-Z0-9_-]{11})", parsed.path)
+        if bare:
+            return bare.group(1)
+    v = parse_qs(parsed.query).get("v", [""])[0]
+    return v if re.fullmatch(r"[a-zA-Z0-9_-]{11}", v) else None
+
+
+def _canonical_youtube_url(url: str) -> str:
+    """the canonical watch URL for a youtube video, used as the dedup / source-link key."""
+    vid = canonical_youtube_id(url)
+    return f"https://www.youtube.com/watch?v={vid}" if vid else url
+
+
 def is_youtube(url: str) -> bool:
-    """check if URL is a youtube video."""
-    return bool(re.match(r"https?://(www\.)?(youtube\.com/watch|youtu\.be/)", url))
+    """True if url is a youtube video URL, in any of its forms."""
+    return canonical_youtube_id(url) is not None
 
 
 def _youtube_video_id(url: str) -> str:
-    """extract video ID from youtube URL."""
-    match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", url)
-    if not match:
+    """the video ID, or a clear error if the URL carries no valid youtube id."""
+    vid = canonical_youtube_id(url)
+    if not vid:
         raise ValueError(f"could not parse youtube URL: {url}")
-    return match.group(1)
+    return vid
 
 
 def extract_from_youtube(
@@ -105,7 +140,10 @@ def extract_from_youtube(
         except Exception:
             transcript = available[0]
 
-    entries = transcript.fetch()
+    try:
+        entries = transcript.fetch()
+    except Exception as e:
+        raise ValueError(f"could not fetch transcript for {url}: {e}") from e
     text = "\n".join(
         entry.text if hasattr(entry, "text") else entry.get("text", str(entry))
         for entry in entries
@@ -118,26 +156,15 @@ def extract_from_youtube(
 
 
 def _interactive_lang_pick(available: list) -> object:
-    """show language menu and let user pick."""
-    from rich.console import Console
-    console = Console()
+    """pick a transcript language through the shared dropdown; defaults to the first if cancelled."""
+    from metis.pick import pick_from
 
-    console.print("\n[bold]available transcripts:[/bold]")
-    for i, t in enumerate(available, 1):
-        auto = " (auto-generated)" if t.is_generated else ""
-        console.print(f"  {i}. {t.language} ({t.language_code}){auto}")
-
-    while True:
-        choice = input("\npick language [1]: ").strip()
-        if not choice:
-            return available[0]
-        try:
-            idx = int(choice) - 1
-            if 0 <= idx < len(available):
-                return available[idx]
-        except ValueError:
-            pass
-        console.print("[red]invalid choice[/red]")
+    options = [
+        (f"{t.language} ({t.language_code}){' (auto-generated)' if t.is_generated else ''}", t)
+        for t in available
+    ]
+    picked = pick_from("language:", options, default=available[0])
+    return picked if picked is not None else available[0]
 
 
 def _youtube_metadata(url: str) -> tuple[str, str | None]:
@@ -253,13 +280,16 @@ def _fetch_thread(conversation_id: str, bearer_token: str) -> str | None:
 
 def _extract_via_oembed(url: str) -> tuple[str, str, str | None]:
     """extract tweet text via oembed (no auth). returns (title, text, author)."""
-    response = httpx.get(
-        "https://publish.twitter.com/oembed",
-        params={"url": url, "format": "json"},
-        timeout=10,
-    )
-    response.raise_for_status()
-    data = response.json()
+    try:
+        response = httpx.get(
+            "https://publish.twitter.com/oembed",
+            params={"url": url, "format": "json"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except httpx.HTTPError as e:
+        raise ValueError(f"could not fetch tweet (deleted, protected, or rate-limited): {url}") from e
 
     author = data.get("author_name", "unknown")
     # html field contains the tweet in a blockquote — strip tags
@@ -283,8 +313,10 @@ def extract_from_xtweet(url: str, bearer_token: str = "") -> tuple[str, str, str
         try:
             return _extract_via_x_api(url, bearer_token)
         except Exception as e:
-            from rich.console import Console
-            Console().print(f"[yellow]X API failed ({e}), falling back to oembed[/yellow]")
+            from rich.markup import escape
+
+            from metis.ui import err_console
+            err_console.print(f"[warn]the X API failed ({escape(str(e))}), falling back to oembed[/warn]")
 
     return _extract_via_oembed(url)
 
@@ -309,7 +341,7 @@ def extract_from_pdf_url(url: str) -> tuple[str, str]:
     # verify we actually got a PDF, not an HTML redirect or error page
     content_type = response.headers.get("content-type", "")
     if response.content[:16].lstrip()[:5] != b"%PDF-":
-        raise ValueError(f"URL does not serve a PDF (content-type {content_type}): {url}")
+        raise ValueError(f"the URL does not serve a PDF (content-type {content_type}): {url}")
 
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(response.content)
@@ -589,11 +621,13 @@ def extract(
     - source_link is the URL or file:// URI for linking back
     - extra_metadata is optional dict (e.g. channel for youtube)
     """
+    source = source.strip()
     if is_url(source):
+        source = _normalize_url(source)
         if is_youtube(source):
             title, text, channel = extract_from_youtube(source, lang=lang, pick_lang=pick_lang)
             extra = {"channel": channel} if channel else None
-            return title, text, "youtube", source, extra
+            return title, text, "youtube", _canonical_youtube_url(source), extra
 
         if is_xtweet(source):
             title, text, author = extract_from_xtweet(source, bearer_token=x_bearer_token)
