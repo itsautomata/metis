@@ -58,3 +58,27 @@ def test_find_vault_files_skips_dot_dirs(tmp_path):
 
     found = {p.name for p in sync._find_vault_files(_cfg(vault, tmp_path))}
     assert found == {"live.md"}
+
+
+def test_sync_skips_permission_denied_file(monkeypatch, tmp_path):
+    """a chmod 000 note (PermissionError) is skipped, not a whole-sync abort."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "good.md").write_text("a real note body", encoding="utf-8")
+    (vault / "locked.md").write_text("secret", encoding="utf-8")
+
+    real_hash = sync._file_hash
+
+    def _hash(path):
+        if path.name == "locked.md":
+            raise PermissionError(str(path))
+        return real_hash(path)
+
+    monkeypatch.setattr(sync, "_file_hash", _hash)
+    monkeypatch.setattr(sync, "get_collection", lambda config: _EmptyCollection())
+    monkeypatch.setattr(sync, "store_chunks", lambda chunks, path, config: len(chunks))
+
+    report = sync.sync_vault(_cfg(vault, tmp_path))
+
+    assert report.skipped == 1
+    assert report.added == 1

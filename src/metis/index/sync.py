@@ -150,9 +150,9 @@ def sync_vault(
             else:
                 # unchanged
                 report.unchanged += 1
-        except (FileNotFoundError, IsADirectoryError):
-            # a broken symlink, or a file moved/deleted between the scan and now: leave it out of
-            # current_paths so its stale vectors get pruned below, and move on.
+        except OSError:
+            # unreadable for any reason (broken symlink, permission denied, moved/deleted mid-scan):
+            # leave it out of current_paths so its stale vectors get pruned below, and move on.
             report.skipped += 1
             continue
 
